@@ -1,0 +1,12 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/tmd/(.*)",
+      "destination": "https://data.tmd.go.th/$1"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

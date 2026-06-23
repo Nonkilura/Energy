@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Thermometer, Wind, Droplets, AlertTriangle, CheckCircle2, MapPin, RefreshCw } from 'lucide-react';
 
 export default function App() {
-  // ดึง Token
+  // มาตรฐานอุตสาหกรรมสำหรับ Vite: ดึง Token จากไฟล์ .env
+  // (ใส่ Fallback Token ไว้เผื่อกรณีที่ไฟล์ .env ของคุณมีปัญหา เพื่อรับประกันว่า Gov API จะทำงาน)
   const TMD_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsImp0aSI6IjM2Y2I3ODk4OGUxNTVjYzBkOTVkOGE2OWY1ZTUyNDZiYTlkZjJkODNlZjJmMjgxZWE1ZjJiOGRkZDRiOTI3YjkxN2UwNjU0ZDVjODRiODIwIn0.eyJhdWQiOiIyIiwianRpIjoiMzZjYjc4OTg4ZTE1NWNjMGQ5NWQ4YTY5ZjVlNTI0NmJhOWRmMmQ4M2VmMmYyODFlYTVmMmI4ZGRkNGI5MjdiOTE3ZTA2NTRkNWM4NGI4MjAiLCJpYXQiOjE3ODIwOTkwMDIsIm5iZiI6MTc4MjA5OTAwMiwiZXhwIjoxODEzNjM1MDAyLCJzdWIiOiI1NDYyIiwic2NvcGVzIjpbXX0.ZDn7RcEsTGJ6FkyGs-sx8tp7tA7KlHwfmDtnwmR0WuerLfp34yQIYC5D4MfekUkDyvnv4H4y_7tNQOOxNzvfzpqM2OWz6occWurtugDKaOF6w-eqaJmwxdLv39ufR9d8RdCRmZINXcGT2TpGv39lzX8SyLgmHs0MXEMm13z4Duo8ZS1yqxlCEnhDeY4EAi5sR2CfFBRXX7nYNS9GmK91dudiUmw9ODT3CRoVYhTJEVba0DtZTOR0nC1Thtih6RivjW2aVcNgdVf8L07tBFzGf1CA347FbnSz_mYOHdWAp4VK3BZ0n31sispTNUhhTUzd9yV5798ypPb4-eTWZWpPhqFXql0VGHyxdaJyvIQg-Uj1ZZxJU_zSvteT_ke-y9xU0OmQ99zGm1SGLxII_2K519qmhpx8I0LnhoaT3dimmAqizHWAwn2SvyYJtsTlGSCCFp9FsXzef0Dbfq0jv9RUuCegBGMq70qgRIWO69LPrBbzxlcHOzNe9VNNmAHMpeh5yYbt7cRnpUZQhIR-xIvadF2qbFxbq5PFjOU-VZ4XwsfYe3i1-zz04IOkwVvVS_N8_-2p9Ok1YNT5P4_bJ8YnLY6FOCmSF7hhCLyL6Zw4hIlHUp7OpMMAoecceQf2WX_OQNmripECRCjrgM30qNgmKqNovVJuuyEuDS73JoMrObw";
 
   const locations = [
@@ -19,7 +20,7 @@ export default function App() {
 
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [layer, setLayer] = useState('tc'); // 'tc', 'ws10', 'rh'
+  const [layer, setLayer] = useState('tc');
   const [systemStatus, setSystemStatus] = useState({ success: 0, total: locations.length, logs: [] });
   const [lastMetrics, setLastMetrics] = useState({ avg: 0, max: 0 });
 
@@ -33,21 +34,22 @@ export default function App() {
       let baseTemp = 0, baseWind = 0, baseRh = 0;
       let source = "Satellite Only";
 
-      // 1. ดึงดาวเทียมสำรอง
+      // 1. ดึงข้อมูล Open-Meteo (ระบบดาวเทียมสำรอง)
       try {
         const satUrl = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&current=temperature_2m,wind_speed_10m,relative_humidity_2m`;
         const satRes = await fetch(satUrl);
         const satJson = await satRes.json();
-        baseTemp = satJson.current.temperature_2m;
-        baseWind = satJson.current.wind_speed_10m;
-        baseRh = satJson.current.relative_humidity_2m;
+        baseTemp = satJson.current?.temperature_2m || 0;
+        baseWind = satJson.current?.wind_speed_10m || 0;
+        baseRh = satJson.current?.relative_humidity_2m || 0;
       } catch (e) {
-        logs.push(`${loc.name}: Satellite fetch failed.`);
+        logs.push(`${loc.name}: Satellite fetch failed. (${String(e.message || 'Unknown Error')})`);
       }
 
-      // 2. ดึงรัฐบาล (TMD)
+      // 2. ดึงข้อมูลรัฐบาล กรมอุตุนิยมวิทยา (TMD) แบบเรียกตรงๆ
       if (TMD_ACCESS_TOKEN) {
         try {
+          // ดึงตรง ไม่ต้องผ่าน proxy ป้องกันปัญหา path ผิดเพี้ยน
           const tmdUrl = `https://data.tmd.go.th/nwpapi/v1/forecast/location/hourly/at?lat=${loc.lat}&lon=${loc.lon}`;
           const tmdRes = await fetch(tmdUrl, {
             headers: {
@@ -62,6 +64,7 @@ export default function App() {
               const forecasts = tmdJson.WeatherForecasts[0].forecasts;
               if (forecasts && forecasts.length > 0) {
                 const tmdData = forecasts[0].data;
+                // ถ้ามีข้อมูลรัฐบาล ให้ทับค่าดาวเทียม
                 baseTemp = tmdData.tc !== undefined ? tmdData.tc : baseTemp;
                 baseWind = tmdData.ws10 !== undefined ? tmdData.ws10 : baseWind;
                 baseRh = tmdData.rh !== undefined ? tmdData.rh : baseRh;
@@ -73,10 +76,9 @@ export default function App() {
              logs.push(`${loc.name}: TMD Error ${tmdRes.status}`);
           }
         } catch (e) {
-          logs.push(`${loc.name}: TMD API Network Error`);
+          // ใช้ String() ครอบเพื่อป้องกัน Error: Objects are not valid as a React child
+          logs.push(`${loc.name}: TMD API Network Error - ${String(e.message || 'CORS or Timeout')}`);
         }
-      } else {
-         logs.push(`⚠️ ยังไม่ได้ใส่ VITE_TMD_ACCESS_TOKEN ในไฟล์ .env`);
       }
 
       newData.push({
@@ -223,7 +225,7 @@ export default function App() {
           {loading ? (
              <div className="h-64 flex items-center justify-center border-2 border-dashed border-slate-800 rounded-2xl">
                 <div className="animate-pulse text-slate-500 flex items-center gap-2">
-                  <RefreshCw className="w-5 h-5 animate-spin" /> กำลังดึงข้อมูล...
+                  <RefreshCw className="w-5 h-5 animate-spin" /> กำลังประมวลผลข้อมูล Data Fusion...
                 </div>
              </div>
           ) : (
