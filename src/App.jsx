@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Thermometer, Wind, Droplets, AlertTriangle, CheckCircle2, MapPin, RefreshCw } from 'lucide-react';
-
+/// อย่าลืมมาแก้ app.jsx จากเมื่อวานที่เจมมินี่ถึงลิมิต
 export default function App() {
   // มาตรฐานอุตสาหกรรมสำหรับ Vite: ดึง Token จากไฟล์ .env
   // (ใส่ Fallback Token ไว้เผื่อกรณีที่ไฟล์ .env ของคุณมีปัญหา เพื่อรับประกันว่า Gov API จะทำงาน)
