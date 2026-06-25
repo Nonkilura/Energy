@@ -50,7 +50,7 @@ export default function App() {
       if (TMD_ACCESS_TOKEN) {
         try {
           // ดึงตรง ไม่ต้องผ่าน proxy ป้องกันปัญหา path ผิดเพี้ยน
-          const tmdUrl = `https://data.tmd.go.th/nwpapi/v1/forecast/location/hourly/at?lat=${loc.lat}&lon=${loc.lon}`;
+          const tmdUrl = `/api/tmd/nwpapi/v1/forecast/location/hourly/at?lat=${loc.lat}&lon=${loc.lon}`;
           const tmdRes = await fetch(tmdUrl, {
             headers: {
               'authorization': `Bearer ${TMD_ACCESS_TOKEN}`,
