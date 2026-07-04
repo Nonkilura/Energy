@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Thermometer, Wind, Droplets, AlertTriangle, CheckCircle2, MapPin, RefreshCw, Database, CloudRain, Cloud, Gauge } from 'lucide-react';
 
 export default function App() {
-  // ⚠️ เปลี่ยน URL ด้านล่างนี้เป็นของ Firebase คุณ (ต้องมี /energy_data.json ต่อท้าย)
+  // ⚠️ อย่าลืมเปลี่ยน URL เป็นของ Firebase คุณเหมือนเดิม
   const FIREBASE_URL = "https://energyme-8727d-default-rtdb.asia-southeast1.firebasedatabase.app/energy_data.json";
 
   const [data, setData] = useState([]);
@@ -20,7 +20,6 @@ export default function App() {
       const dbData = await res.json();
 
       if (dbData && dbData.data) {
-        // ดึงข้อมูลตรงๆ จาก Firebase ที่ Python ประมวลผลมาให้แล้ว (รวมถึง Pressure, Cloud, Rain Prob)
         setData(dbData.data);
         setSystemStatus({
           success: dbData.successCount || 0,
@@ -40,12 +39,10 @@ export default function App() {
 
   useEffect(() => {
     fetchData();
-    // ให้เว็บอัปเดตข้อมูลจาก Firebase อัตโนมัติทุกๆ 5 นาที
     const interval = setInterval(fetchData, 300000);
     return () => clearInterval(interval);
   }, []);
 
-  // ระบบคำนวณค่าเฉลี่ยและค่าสูงสุด พร้อมป้องกัน Error กรณีข้อมูลบางตัวหายไป (|| 0)
   const currentAvg = data.length > 0 ? data.reduce((acc, curr) => acc + (curr[layer] || 0), 0) / data.length : 0;
   const currentMax = data.length > 0 ? Math.max(...data.map(d => d[layer] || 0)) : 0;
 
@@ -58,7 +55,6 @@ export default function App() {
   const deltaAvg = currentAvg - lastMetrics.avg;
   const deltaMax = currentMax - lastMetrics.max;
 
-  // 🗺️ นิยามชั้นข้อมูลเชิงลึกทางอุตุนิยมวิทยาครบชุด (อิงจาก API ของรัฐและดาวเทียม)
   const layerInfo = {
     'tc': { name: 'อุณหภูมิ', icon: <Thermometer className="w-5 h-5 text-orange-500" />, unit: '°C', color: 'text-orange-500' },
     'ws10': { name: 'ความเร็วลม', icon: <Wind className="w-5 h-5 text-teal-400" />, unit: ' km/h', color: 'text-teal-400' },
@@ -73,10 +69,18 @@ export default function App() {
 
       {/* Sidebar */}
       <div className="w-72 bg-slate-900 border-r border-slate-800 p-6 flex flex-col shadow-xl z-10 overflow-y-auto">
+
+        {/* 🌟 จุดที่แก้ไข: ใส่โลโก้และเปลี่ยนชื่อโปรเจกต์ */}
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-teal-400 mb-2">
-            EnergyGIS Core
-          </h1>
+          <div className="flex items-center gap-3 mb-3">
+            {/* ดึงไฟล์รูป logo.png จากโฟลเดอร์ public */}
+            <div className="w-12 h-12 bg-white rounded-xl shadow-md p-1 flex items-center justify-center shrink-0">
+              <img src="/logo.png" alt="Propolis Logo" className="w-full h-full object-contain" />
+            </div>
+            <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-teal-400 tracking-tight">
+              Propolis
+            </h1>
+          </div>
           <p className="text-xs text-emerald-500/80 mb-2 flex items-center gap-1 font-mono">
             <Database className="w-3 h-3" /> Architecture: Decoupled
           </p>
