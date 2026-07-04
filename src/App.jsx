@@ -1,27 +1,55 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Thermometer, Wind, Droplets, AlertTriangle, CheckCircle2, MapPin, RefreshCw, Database, CloudRain, Cloud, Gauge, Sun, Moon, Menu, X, Map as MapIcon, LayoutDashboard } from 'lucide-react';
-// 🗺️ Import เครื่องมือสร้างแผนที่
-import { MapContainer, TileLayer, CircleMarker, Tooltip } from 'react-leaflet';
-import 'leaflet/dist/leaflet.css'; // ต้องมีเพื่อให้แผนที่แสดงผลถูกต้อง
+
+// โหลด Leaflet ผ่าน CDN (แก้ปัญหา Dependency บนระบบ Preview)
+const loadLeaflet = () => {
+  return new Promise((resolve) => {
+    if (window.L) return resolve(window.L);
+
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+    document.head.appendChild(link);
+
+    const script = document.createElement('script');
+    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    script.onload = () => resolve(window.L);
+    document.head.appendChild(script);
+  });
+};
+
+const LOCATIONS_COORDS = {
+  "เชียงใหม่": { lat: 18.79, lon: 98.98 },
+  "ขอนแก่น": { lat: 16.48, lon: 102.82 },
+  "กรุงเทพมหานคร": { lat: 13.75, lon: 100.50 },
+  "ระยอง": { lat: 12.68, lon: 101.27 },
+  "หัวหิน": { lat: 12.56, lon: 99.95 },
+  "สุราษฎร์ธานี": { lat: 9.14, lon: 99.32 },
+  "ภูเก็ต": { lat: 7.88, lon: 98.39 },
+  "หาดใหญ่": { lat: 7.00, lon: 100.46 },
+  "สงขลา": { lat: 7.19, lon: 100.59 }
+};
 
 export default function App() {
   const FIREBASE_URL = "https://energyme-8727d-default-rtdb.asia-southeast1.firebasedatabase.app/energy_data.json";
 
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
-
-  // 🎛️ State สำหรับควบคุม UI
   const [layer, setLayer] = useState('tc');
   const [theme, setTheme] = useState('dark');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [activeView, setActiveView] = useState('map'); // 'map' หรือ 'dashboard'
+  const [activeView, setActiveView] = useState('map');
 
   const [systemStatus, setSystemStatus] = useState({ success: 0, total: 9, logs: [], lastUpdated: "" });
   const [lastMetrics, setLastMetrics] = useState({ avg: 0, max: 0 });
 
+  const mapRef = useRef(null);
+  const mapInstance = useRef(null);
+  const markersLayer = useRef(null);
+  const tileLayer = useRef(null);
+
   const isDark = theme === 'dark';
 
-  // 🎨 ดิกชันนารีสี (Theme)
   const t = {
     bg: isDark ? 'bg-slate-950' : 'bg-gray-50',
     text: isDark ? 'text-slate-200' : 'text-slate-700',
@@ -39,6 +67,25 @@ export default function App() {
     themeToggleBg: isDark ? 'bg-slate-950/50' : 'bg-gray-100',
   };
 
+  const layerInfo = {
+    'tc': { name: 'อุณหภูมิ', icon: <Thermometer className="w-5 h-5 text-orange-500" />, unit: '°C', color: 'text-orange-500' },
+    'ws10': { name: 'ความเร็วลม', icon: <Wind className="w-5 h-5 text-teal-500" />, unit: ' km/h', color: 'text-teal-500' },
+    'rh': { name: 'ความชื้นสัมพัทธ์', icon: <Droplets className="w-5 h-5 text-blue-500" />, unit: '%', color: 'text-blue-500' },
+    'pressure': { name: 'ความกดอากาศ', icon: <Gauge className="w-5 h-5 text-purple-500" />, unit: ' hPa', color: 'text-purple-500' },
+    'cloud': { name: 'ปริมาณเมฆ', icon: <Cloud className={`w-5 h-5 ${isDark ? 'text-slate-300' : 'text-slate-500'}`} />, unit: '%', color: isDark ? 'text-slate-300' : 'text-slate-500' },
+    'rain_prob': { name: 'โอกาสเกิดฝน', icon: <CloudRain className="w-5 h-5 text-indigo-500" />, unit: '%', color: 'text-indigo-500' }
+  };
+
+  const getMarkerColor = (value, currentLayer) => {
+    if (currentLayer === 'tc') return value > 35 ? '#ef4444' : value > 30 ? '#f97316' : '#3b82f6';
+    if (currentLayer === 'ws10') return value > 20 ? '#a855f7' : value > 10 ? '#14b8a6' : '#64748b';
+    if (currentLayer === 'rh') return value > 80 ? '#2563eb' : value > 50 ? '#3b82f6' : '#93c5fd';
+    if (currentLayer === 'pressure') return value > 1015 ? '#8b5cf6' : '#c084fc';
+    if (currentLayer === 'cloud') return value > 70 ? '#64748b' : '#cbd5e1';
+    if (currentLayer === 'rain_prob') return value > 70 ? '#4f46e5' : value > 30 ? '#6366f1' : '#9ca3af';
+    return isDark ? '#e2e8f0' : '#475569';
+  };
+
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -46,7 +93,12 @@ export default function App() {
       if (!res.ok) throw new Error(`HTTP Error: ${res.status}`);
       const dbData = await res.json();
       if (dbData && dbData.data) {
-        setData(dbData.data);
+        const mergedData = dbData.data.map(item => ({
+          ...item,
+          lat: item.lat || LOCATIONS_COORDS[item.name]?.lat,
+          lon: item.lon || LOCATIONS_COORDS[item.name]?.lon,
+        }));
+        setData(mergedData);
         setSystemStatus({
           success: dbData.successCount || 0,
           total: dbData.data.length || 9,
@@ -68,40 +120,128 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  const currentAvg = data.length > 0 ? data.reduce((acc, curr) => acc + (curr[layer] || 0), 0) / data.length : 0;
-  const currentMax = data.length > 0 ? Math.max(...data.map(d => d[layer] || 0)) : 0;
-
+  // Update Data Metrics
   useEffect(() => {
-    if (!loading && data.length > 0) setLastMetrics({ avg: currentAvg, max: currentMax });
-  }, [layer, loading, currentAvg, currentMax, data]);
+    if (!loading && data.length > 0) {
+      const currentAvg = data.reduce((acc, curr) => acc + (curr[layer] || 0), 0) / data.length;
+      const currentMax = Math.max(...data.map(d => d[layer] || 0));
+      setLastMetrics({ avg: currentAvg, max: currentMax });
+    }
+  }, [layer, loading, data]);
 
-  const deltaAvg = currentAvg - lastMetrics.avg;
-  const deltaMax = currentMax - lastMetrics.max;
+  // Initialize Map
+  useEffect(() => {
+    let L;
+    loadLeaflet().then((leaflet) => {
+      L = leaflet;
+      if (!mapInstance.current && mapRef.current) {
+        mapInstance.current = L.map(mapRef.current, {
+          center: [13.736717, 100.523186],
+          zoom: 6,
+          zoomControl: false
+        });
 
-  const layerInfo = {
-    'tc': { name: 'อุณหภูมิ', icon: <Thermometer className="w-5 h-5 text-orange-500" />, unit: '°C', color: 'text-orange-500' },
-    'ws10': { name: 'ความเร็วลม', icon: <Wind className="w-5 h-5 text-teal-500" />, unit: ' km/h', color: 'text-teal-500' },
-    'rh': { name: 'ความชื้นสัมพัทธ์', icon: <Droplets className="w-5 h-5 text-blue-500" />, unit: '%', color: 'text-blue-500' },
-    'pressure': { name: 'ความกดอากาศ', icon: <Gauge className="w-5 h-5 text-purple-500" />, unit: ' hPa', color: 'text-purple-500' },
-    'cloud': { name: 'ปริมาณเมฆ', icon: <Cloud className={`w-5 h-5 ${isDark ? 'text-slate-300' : 'text-slate-500'}`} />, unit: '%', color: isDark ? 'text-slate-300' : 'text-slate-500' },
-    'rain_prob': { name: 'โอกาสเกิดฝน', icon: <CloudRain className="w-5 h-5 text-indigo-500" />, unit: '%', color: 'text-indigo-500' }
-  };
+        tileLayer.current = L.tileLayer(
+          isDark
+            ? "https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png"
+            : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+          { attribution: '&copy; Carto' }
+        ).addTo(mapInstance.current);
 
-  // 🗺️ ฟังก์ชันกำหนดสีของ Marker บนแผนที่ตามค่าของข้อมูล
-  const getMarkerColor = (value, currentLayer) => {
-    if (currentLayer === 'tc') return value > 35 ? '#ef4444' : value > 30 ? '#f97316' : '#3b82f6';
-    if (currentLayer === 'ws10') return value > 20 ? '#a855f7' : value > 10 ? '#14b8a6' : '#64748b';
-    if (currentLayer === 'rain_prob') return value > 70 ? '#4f46e5' : value > 30 ? '#6366f1' : '#9ca3af';
-    return isDark ? '#e2e8f0' : '#475569';
-  };
+        markersLayer.current = L.layerGroup().addTo(mapInstance.current);
+      }
+    });
 
-  // 🌍 พิกัดศูนย์กลางประเทศไทย
-  const THAILAND_CENTER = [13.736717, 100.523186];
+    return () => {
+      if (mapInstance.current) {
+        mapInstance.current.remove();
+        mapInstance.current = null;
+      }
+    };
+  }, []); // Run once
+
+  // Update Map Theme
+  useEffect(() => {
+    if (mapInstance.current && tileLayer.current) {
+      const newUrl = isDark
+        ? "https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png"
+        : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png";
+      tileLayer.current.setUrl(newUrl);
+
+      const container = mapRef.current;
+      if(container) {
+          container.style.backgroundColor = isDark ? '#0f172a' : '#f8fafc';
+      }
+    }
+  }, [isDark]);
+
+  // Update Markers
+  useEffect(() => {
+    if (window.L && mapInstance.current && markersLayer.current && data.length > 0) {
+      const L = window.L;
+      markersLayer.current.clearLayers();
+
+      data.forEach(loc => {
+        if (loc.lat && loc.lon) {
+          const color = getMarkerColor(loc[layer], layer);
+
+          const tooltipContent = `
+            <div style="text-align: center; font-family: sans-serif; color: ${isDark ? 'white' : 'black'}">
+              <strong style="display: block; border-bottom: 1px solid rgba(128,128,128,0.3); padding-bottom: 4px; margin-bottom: 4px;">${loc.name}</strong>
+              <div style="font-size: 12px;">
+                <div style="display: flex; justify-content: space-between; gap: 16px;">
+                  <span>${layerInfo[layer].name}:</span>
+                  <strong>${(loc[layer] || 0).toFixed(1)}${layerInfo[layer].unit}</strong>
+                </div>
+                ${layer !== 'tc' ? `
+                <div style="display: flex; justify-content: space-between; gap: 16px; color: gray;">
+                  <span>อุณหภูมิ:</span>
+                  <span>${(loc.tc || 0).toFixed(1)}°C</span>
+                </div>` : ''}
+                ${layer !== 'rain_prob' ? `
+                <div style="display: flex; justify-content: space-between; gap: 16px; color: gray;">
+                  <span>โอกาสฝน:</span>
+                  <span>${(loc.rain_prob || 0).toFixed(0)}%</span>
+                </div>` : ''}
+              </div>
+            </div>
+          `;
+
+          const marker = L.circleMarker([loc.lat, loc.lon], {
+            radius: 18,
+            color: color,
+            fillColor: color,
+            fillOpacity: 0.6,
+            weight: 2
+          });
+
+          marker.bindTooltip(tooltipContent, {
+            direction: 'top',
+            offset: [0, -10],
+            opacity: 1,
+            className: isDark ? 'dark-tooltip' : 'light-tooltip'
+          });
+
+          markersLayer.current.addLayer(marker);
+        }
+      });
+    }
+  }, [data, layer, isDark]);
+
+  // Handle Resize for Leaflet when switching views
+  useEffect(() => {
+      if(activeView === 'map' && mapInstance.current) {
+          setTimeout(() => {
+              mapInstance.current.invalidateSize();
+          }, 400); // Wait for transition
+      }
+  }, [activeView, isSidebarOpen]);
+
 
   return (
     <div className={`h-screen w-full flex overflow-hidden ${t.bg} ${t.text} font-sans transition-colors duration-300`}>
 
-      {/* 📍 Sidebar (แถบด้านข้าง) */}
+      {/* 📍 Sidebar */}
       <div
         className={`${t.sidebar} flex flex-col z-40 transition-all duration-300 absolute md:relative h-full shadow-2xl md:shadow-none border-r
         ${isSidebarOpen ? 'w-72 translate-x-0' : 'w-72 -translate-x-full md:w-0 md:border-none'}`}
@@ -115,13 +255,11 @@ export default function App() {
               </div>
               <h1 className="text-2xl font-bold tracking-tight">Propolis</h1>
             </div>
-            {/* ปุ่มปิด Sidebar สำหรับมือถือ */}
             <button onClick={() => setIsSidebarOpen(false)} className="md:hidden p-2 rounded-lg hover:bg-slate-500/20">
               <X size={20} />
             </button>
           </div>
 
-          {/* Theme Toggle */}
           <div className={`flex p-1 rounded-lg mb-6 border ${t.themeToggleBg} ${isDark ? 'border-slate-800' : 'border-gray-200'}`}>
             <button onClick={() => setTheme('light')} className={`flex-1 flex items-center justify-center gap-2 py-1.5 rounded-md text-xs font-semibold transition-all ${!isDark ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-300'}`}>
               <Sun size={14} /> สว่าง
@@ -131,7 +269,6 @@ export default function App() {
             </button>
           </div>
 
-          {/* Navigation Views */}
           <div className="mb-6">
             <label className={`block text-xs font-bold ${t.textMuted} uppercase tracking-wider mb-3`}>มุมมอง (Views)</label>
             <div className="space-y-2">
@@ -146,7 +283,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* Layer Selection */}
           <div className="mb-6">
             <label className={`block text-xs font-bold ${t.textMuted} uppercase tracking-wider mb-3`}>ชั้นข้อมูล (Layers)</label>
             <div className="space-y-2">
@@ -159,7 +295,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* Status */}
           <div className={`p-4 rounded-xl mt-auto border ${systemStatus.success > 0 ? t.statusSuccessBg : t.statusErrorBg}`}>
             <div className="flex items-center gap-3 mb-2">
               {systemStatus.success > 0 ? <CheckCircle2 className={`w-5 h-5 ${t.statusSuccessText}`} /> : <AlertTriangle className={`w-5 h-5 ${t.statusErrorText}`} />}
@@ -173,7 +308,6 @@ export default function App() {
       {/* 🚀 Main Content Area */}
       <div className="flex-1 flex flex-col relative h-full">
 
-        {/* Top Floating Bar (ปุ่มเปิด Sidebar + Refresh) */}
         <div className="absolute top-4 left-4 right-4 z-30 flex justify-between items-center pointer-events-none">
           <button
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
@@ -195,43 +329,8 @@ export default function App() {
 
         {/* 🗺️ MAP VIEW */}
         <div className={`w-full h-full absolute inset-0 transition-opacity duration-500 ${activeView === 'map' ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
-          <MapContainer center={THAILAND_CENTER} zoom={6} className="w-full h-full z-0" zoomControl={false}>
-            <TileLayer
-              url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-              attribution='&copy; <a href="https://carto.com/">Carto</a>'
-              // 🎩 ทริคเปลี่ยนแผนที่เป็น Dark Mode ด้วย CSS Filter
-              className={isDark ? 'map-tiles-dark' : ''}
-            />
+          <div ref={mapRef} className="w-full h-full z-0" style={{ backgroundColor: isDark ? '#0f172a' : '#f8fafc' }}></div>
 
-            {data.map((loc, idx) => (
-              loc.lat && loc.lon && (
-                <CircleMarker
-                  key={idx}
-                  center={[loc.lat, loc.lon]}
-                  radius={18}
-                  pathOptions={{
-                    color: getMarkerColor(loc[layer], layer),
-                    fillColor: getMarkerColor(loc[layer], layer),
-                    fillOpacity: 0.6,
-                    weight: 2
-                  }}
-                >
-                  <Tooltip direction="top" offset={[0, -10]} opacity={1} className={isDark ? 'custom-tooltip-dark' : ''}>
-                    <div className="text-center">
-                      <strong className="text-sm">{loc.name}</strong>
-                      <div className="mt-1 text-xs">
-                        อุณหภูมิ: {(loc.tc || 0).toFixed(1)}°C<br/>
-                        ความเร็วลม: {(loc.ws10 || 0).toFixed(1)} km/h
-                      </div>
-                      <div className="text-[10px] text-gray-500 mt-1">{loc.source}</div>
-                    </div>
-                  </Tooltip>
-                </CircleMarker>
-              )
-            ))}
-          </MapContainer>
-
-          {/* Map Overlay Indicator */}
           <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
             <div className={`px-6 py-3 rounded-full shadow-xl border backdrop-blur-md flex items-center gap-3
               ${isDark ? 'bg-slate-900/80 border-slate-700 text-white' : 'bg-white/90 border-gray-200 text-slate-800'}`}>
@@ -241,28 +340,26 @@ export default function App() {
           </div>
         </div>
 
-        {/* 📊 DASHBOARD VIEW (มุมมองเดิม) */}
+        {/* 📊 DASHBOARD VIEW */}
         <div className={`w-full h-full overflow-y-auto p-8 pt-24 absolute inset-0 transition-opacity duration-500 ${t.bg} ${activeView === 'dashboard' ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
           <div className="max-w-7xl mx-auto">
-            <h2 className={`text-2xl font-bold mb-6 ${t.textStrong}`}>ภาพรวมข้อมูล (Dashboard)</h2>
+            <h2 className={`text-2xl font-bold mb-6 ${t.textStrong}`}>แผงควบคุมข้อมูลเชิงลึก (Dashboard)</h2>
 
-            {/* Stats */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
               <div className={`p-6 rounded-2xl border ${t.card}`}>
-                <p className={`text-sm font-medium ${t.textMuted} mb-2`}>ค่าเฉลี่ยระดับประเทศ</p>
+                <p className={`text-sm font-medium ${t.textMuted} mb-2`}>ค่าเฉลี่ยระดับประเทศ ({layerInfo[layer].name})</p>
                 <div className="flex items-end gap-3">
-                  <h2 className={`text-4xl font-light ${t.textStrong}`}>{currentAvg.toFixed(1)}<span className={`text-xl ${t.textMuted} ml-1`}>{layerInfo[layer].unit}</span></h2>
+                  <h2 className={`text-4xl font-light ${t.textStrong}`}>{lastMetrics.avg.toFixed(1)}<span className={`text-xl ${t.textMuted} ml-1`}>{layerInfo[layer].unit}</span></h2>
                 </div>
               </div>
               <div className={`p-6 rounded-2xl border ${t.card}`}>
                 <p className={`text-sm font-medium ${t.textMuted} mb-2`}>จุดวิกฤตสูงสุด (Max)</p>
                 <div className="flex items-end gap-3">
-                  <h2 className={`text-4xl font-light ${layerInfo[layer].color}`}>{currentMax.toFixed(1)}<span className={`text-xl ${t.textMuted} ml-1`}>{layerInfo[layer].unit}</span></h2>
+                  <h2 className={`text-4xl font-light ${layerInfo[layer].color}`}>{lastMetrics.max.toFixed(1)}<span className={`text-xl ${t.textMuted} ml-1`}>{layerInfo[layer].unit}</span></h2>
                 </div>
               </div>
             </div>
 
-            {/* Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {data.map((loc, idx) => (
                 <div key={idx} className={`p-5 rounded-xl border flex justify-between items-center transition-colors ${t.card} ${t.cardHover}`}>
@@ -281,21 +378,19 @@ export default function App() {
 
       </div>
 
-      {/* CSS พิเศษสำหรับ Leaflet Map เพื่อให้เข้ากับระบบ Theme */}
       <style dangerouslySetInnerHTML={{__html: `
-        .map-tiles-dark {
-          filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
-        }
-        .leaflet-container {
-          background-color: ${isDark ? '#0f172a' : '#f8fafc'};
-        }
-        .custom-tooltip-dark {
+        .dark-tooltip {
           background-color: #1e293b !important;
           color: white !important;
-          border: 1px solid #334155 !important;
+          border-color: #334155 !important;
         }
-        .custom-tooltip-dark .leaflet-tooltip-tip {
-          background-color: #1e293b !important;
+        .light-tooltip {
+          background-color: white !important;
+          color: #1e293b !important;
+          border-color: #e2e8f0 !important;
+        }
+        .leaflet-tooltip::before {
+          border-top-color: inherit !important;
         }
       `}} />
     </div>
