@@ -67,14 +67,14 @@ export default function App() {
 
   // 1. เพิ่มชั้นข้อมูล 'rain_mm' เข้าสู่ระบบ
   const layerInfo = {
-    'agri_risk': { name: '⚠️ ประเมินวิกฤตเกษตร', icon: <Sprout className="w-5 h-5 text-green-500" />, unit: '', color: 'text-green-500' },
+    'agri_risk': { name: 'ประเมินการเกษตร', icon: <Sprout className="w-5 h-5 text-green-500" />, unit: '', color: 'text-green-500' },
     'tc': { name: 'อุณหภูมิ', icon: <Thermometer className="w-5 h-5 text-orange-500" />, unit: '°C', color: 'text-orange-500' },
-    'rain_mm': { name: 'ปริมาณฝน (WMO)', icon: <Umbrella className="w-5 h-5 text-cyan-400" />, unit: ' มม./ชม.', color: 'text-cyan-400' }, // เลเยอร์ใหม่
     'ws10': { name: 'ความเร็วลม', icon: <Wind className="w-5 h-5 text-teal-500" />, unit: ' km/h', color: 'text-teal-500' },
     'rh': { name: 'ความชื้นสัมพัทธ์', icon: <Droplets className="w-5 h-5 text-blue-500" />, unit: '%', color: 'text-blue-500' },
     'pressure': { name: 'ความกดอากาศ', icon: <Gauge className="w-5 h-5 text-purple-500" />, unit: ' hPa', color: 'text-purple-500' },
     'cloud': { name: 'ปริมาณเมฆ', icon: <Cloud className={`w-5 h-5 ${isDark ? 'text-slate-300' : 'text-slate-500'}`} />, unit: '%', color: isDark ? 'text-slate-300' : 'text-slate-500' },
-    'rain_prob': { name: 'โอกาสเกิดฝน (%)', icon: <CloudRain className="w-5 h-5 text-indigo-500" />, unit: '%', color: 'text-indigo-500' }
+    'rain_mm': { name: 'ปริมาณฝน (WMO)', icon: <CloudRain className="w-5 h-5 text-blue-400" />, unit: ' มม./ชม.', color: 'text-blue-400' },
+    'rain_prob': { name: 'โอกาสเกิดฝน', icon: <CloudRain className="w-5 h-5 text-indigo-500" />, unit: '%', color: 'text-indigo-500' }
   };
 
   const analyzeRainIntensity = (rain_mm) => {
@@ -141,11 +141,11 @@ export default function App() {
   const getMarkerColor = (value, currentLayer, locData = null) => {
     if (currentLayer === 'agri_risk' && locData) return calculateAgriRisk(locData).color;
     if (currentLayer === 'tc') return value > 35 ? '#ef4444' : value > 30 ? '#f97316' : '#3b82f6';
-    if (currentLayer === 'rain_mm') return value > 50 ? '#e11d48' : value > 15 ? '#f97316' : value > 2.5 ? '#6366f1' : '#3b82f6';
     if (currentLayer === 'ws10') return value > 20 ? '#a855f7' : value > 10 ? '#14b8a6' : '#64748b';
     if (currentLayer === 'rh') return value > 80 ? '#2563eb' : value > 50 ? '#3b82f6' : '#93c5fd';
     if (currentLayer === 'pressure') return value > 1015 ? '#8b5cf6' : '#c084fc';
     if (currentLayer === 'cloud') return value > 70 ? '#64748b' : '#cbd5e1';
+    if (currentLayer === 'rain_mm') return value > 5 ? '#a855f7' : value > 0 ? '#3b82f6' : (isDark ? '#475569' : '#9ca3af');
     if (currentLayer === 'rain_prob') return value > 70 ? '#4f46e5' : value > 30 ? '#6366f1' : '#9ca3af';
     return isDark ? '#e2e8f0' : '#475569';
   };
@@ -248,6 +248,46 @@ export default function App() {
     }
   }, [isDark]);
 
+    // Handle Resize for Leaflet when switching views
+  useEffect(() => {
+      if(activeView === 'map' && mapInstance.current) {
+          setTimeout(() => {
+              mapInstance.current.invalidateSize();
+          }, 400); // Wait for transition
+      }
+  }, [activeView, isSidebarOpen]);
+
+  const renderLegend = () => {
+    let items = [];
+    if (layer === 'agri_risk') {
+      items = [{ c: '#22c55e', l: 'ปกติ' }, { c: '#eab308', l: 'เฝ้าระวัง' }, { c: '#ef4444', l: 'วิกฤต' }];
+    } else if (layer === 'tc') {
+      items = [{ c: '#3b82f6', l: '< 30°C' }, { c: '#f97316', l: '30-35°C' }, { c: '#ef4444', l: '> 35°C' }];
+    } else if (layer === 'ws10') {
+      items = [{ c: '#64748b', l: 'ลมอ่อน' }, { c: '#14b8a6', l: 'ปานกลาง' }, { c: '#a855f7', l: 'ลมแรง' }];
+    } else if (layer === 'rh') {
+      items = [{ c: '#93c5fd', l: '< 50%' }, { c: '#3b82f6', l: '50-80%' }, { c: '#2563eb', l: '> 80%' }];
+    } else if (layer === 'rain_mm') {
+      items = [{ c: isDark ? '#475569' : '#9ca3af', l: 'ไม่มีฝน (0 มม.)' }, { c: '#3b82f6', l: 'ฝนเล็กน้อย' }, { c: '#a855f7', l: 'ฝนตกหนัก' }];
+    } else {
+      items = [{ c: '#9ca3af', l: 'ต่ำ' }, { c: '#6366f1', l: 'ปานกลาง' }, { c: '#4f46e5', l: 'สูง' }];
+    }
+
+    return (
+      <div className={`absolute bottom-8 right-6 z-[400] px-4 py-3 rounded-xl shadow-lg border backdrop-blur-md ${isDark ? 'bg-slate-900/90 border-slate-700 text-white' : 'bg-white/95 border-gray-200 text-slate-800'}`}>
+        <h4 className="text-xs font-bold mb-2 uppercase tracking-wider opacity-80">คำอธิบายสี (Legend)</h4>
+        <div className="flex flex-col gap-2">
+          {items.map((item, i) => (
+            <div key={i} className="flex items-center gap-2 text-sm">
+              <span className="w-4 h-4 rounded-full border shadow-sm" style={{ backgroundColor: item.c, borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)' }}></span>
+              <span className="font-medium">{item.l}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   useEffect(() => {
     if (window.L && mapInstance.current && markersLayer.current && data.length > 0) {
       const L = window.L;
@@ -318,6 +358,47 @@ export default function App() {
           setTimeout(() => mapInstance.current.invalidateSize(), 400);
       }
   }, [activeView, isSidebarOpen]);
+
+  // ... existing code ...
+  // Handle Resize for Leaflet when switching views
+  useEffect(() => {
+      if(activeView === 'map' && mapInstance.current) {
+          setTimeout(() => {
+              mapInstance.current.invalidateSize();
+          }, 400); // Wait for transition
+      }
+  }, [activeView, isSidebarOpen]);
+
+  const renderLegend = () => {
+    let items = [];
+    if (layer === 'agri_risk') {
+      items = [{ c: '#22c55e', l: 'ปกติ' }, { c: '#eab308', l: 'เฝ้าระวัง' }, { c: '#ef4444', l: 'วิกฤต' }];
+    } else if (layer === 'tc') {
+      items = [{ c: '#3b82f6', l: '< 30°C' }, { c: '#f97316', l: '30-35°C' }, { c: '#ef4444', l: '> 35°C' }];
+    } else if (layer === 'ws10') {
+      items = [{ c: '#64748b', l: 'ลมอ่อน' }, { c: '#14b8a6', l: 'ปานกลาง' }, { c: '#a855f7', l: 'ลมแรง' }];
+    } else if (layer === 'rh') {
+      items = [{ c: '#93c5fd', l: '< 50%' }, { c: '#3b82f6', l: '50-80%' }, { c: '#2563eb', l: '> 80%' }];
+    } else if (layer === 'rain_mm') {
+      items = [{ c: isDark ? '#475569' : '#9ca3af', l: 'ไม่มีฝน (0 มม.)' }, { c: '#3b82f6', l: 'ฝนเล็กน้อย' }, { c: '#a855f7', l: 'ฝนตกหนัก' }];
+    } else {
+      items = [{ c: '#9ca3af', l: 'ต่ำ' }, { c: '#6366f1', l: 'ปานกลาง' }, { c: '#4f46e5', l: 'สูง' }];
+    }
+
+    return (
+      <div className={`absolute bottom-8 right-6 z-[400] px-4 py-3 rounded-xl shadow-lg border backdrop-blur-md ${isDark ? 'bg-slate-900/90 border-slate-700 text-white' : 'bg-white/95 border-gray-200 text-slate-800'}`}>
+        <h4 className="text-xs font-bold mb-2 uppercase tracking-wider opacity-80">คำอธิบายสี (Legend)</h4>
+        <div className="flex flex-col gap-2">
+          {items.map((item, i) => (
+            <div key={i} className="flex items-center gap-2 text-sm">
+              <span className="w-4 h-4 rounded-full border shadow-sm" style={{ backgroundColor: item.c, borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)' }}></span>
+              <span className="font-medium">{item.l}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className={`h-screen w-full flex overflow-hidden ${t.bg} ${t.text} font-sans transition-colors duration-300`}>
@@ -397,12 +478,17 @@ export default function App() {
         {/* 🗺️ MAP VIEW */}
         <div className={`w-full h-full absolute inset-0 transition-opacity duration-500 ${activeView === 'map' ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
           <div ref={mapRef} className="w-full h-full z-0" style={{ backgroundColor: isDark ? '#0f172a' : '#f8fafc' }}></div>
+
           <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
-            <div className={`px-6 py-3 rounded-full shadow-xl border backdrop-blur-md flex items-center gap-3 ${isDark ? 'bg-slate-900/80 border-slate-700 text-white' : 'bg-white/90 border-gray-200 text-slate-800'}`}>
+            <div className={`px-6 py-3 rounded-full shadow-xl border backdrop-blur-md flex items-center gap-3
+              ${isDark ? 'bg-slate-900/80 border-slate-700 text-white' : 'bg-white/90 border-gray-200 text-slate-800'}`}>
               {layerInfo[layer].icon}
               <span className="font-bold">โหมดแสดงผล: {layerInfo[layer].name}</span>
             </div>
           </div>
+
+          {/* แสดงคำอธิบายสีที่มุมขวาล่าง */}
+          {renderLegend()}
         </div>
 
         {/* 📊 DASHBOARD VIEW */}
@@ -469,23 +555,33 @@ export default function App() {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {data.map((loc, idx) => {
-                    const rainStatus = analyzeRainIntensity(loc[layer] || 0);
-                    return (
-                    <div key={idx} className={`p-5 rounded-xl border flex flex-col justify-between transition-colors ${t.card} ${t.cardHover}`}>
-                      <div className="flex justify-between items-start">
+                  {data.map((loc, idx) => (
+                    <div key={idx} className={`p-5 rounded-xl border flex flex-col justify-center transition-colors ${t.card} ${t.cardHover}`}>
+                      <div className="flex justify-between items-center w-full">
                         <div>
                           <h4 className={`font-bold ${t.textStrong}`}>{loc.name}</h4>
                           <p className={`text-xs mt-1 font-mono ${t.textMuted}`}>
-                            {loc.source?.includes('TMD') && ['tc', 'ws10', 'rh', 'pressure'].includes(layer)
+                            {loc.source?.includes('TMD') && ['tc', 'ws10', 'rh', 'pressure', 'rain_mm'].includes(layer)
                               ? '🟢 TMD API'
                               : '🟡 Open-Meteo Satellite'}
                           </p>
                         </div>
-                        <div className={`text-2xl font-semibold text-right ${layerInfo[layer].color}`}>
+                        <div className={`text-2xl font-semibold ${layerInfo[layer].color}`}>
                           {(loc[layer] || 0).toFixed(1)}<span className={`text-sm ml-1 ${t.textMuted}`}>{layerInfo[layer].unit}</span>
                         </div>
                       </div>
+
+                      {/* ป้ายกำกับ "ไม่มีฝน" เมื่อค่าปริมาณฝนเป็น 0 */}
+                      {layer === 'rain_mm' && (loc[layer] || 0) === 0 && (
+                        <div className={`mt-4 py-1.5 w-full text-center rounded-lg text-xs font-semibold border ${isDark ? 'bg-slate-800/50 border-slate-700 text-slate-400' : 'bg-gray-50 border-gray-200 text-slate-500'}`}>
+                          ไม่มีฝน
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
 
                       {/* 4. แสดงผลป้ายกำกับสถานะ WMO ลงในการ์ดของ Dashboard */}
                       {layer === 'rain_mm' && (
