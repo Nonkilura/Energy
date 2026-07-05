@@ -33,38 +33,38 @@ const LOCATIONS_COORDS = {
 export default function App() {
   const FIREBASE_URL = "https://energyme-8727d-default-rtdb.asia-southeast1.firebasedatabase.app/energy_data.json";
 
+  // --- ตัวแปร State ที่จำเป็นทั้งหมด (รอบก่อนหน้าส่วนนี้หายไป) ---
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [layer, setLayer] = useState('tc');
-  const renderLegend = () => {
-    let items = [];
-    if (layer === 'agri_risk') {
-      items = [{ c: '#22c55e', l: 'ปกติ' }, { c: '#eab308', l: 'เฝ้าระวัง' }, { c: '#ef4444', l: 'วิกฤต' }];
-    } else if (layer === 'tc') {
-      items = [{ c: '#3b82f6', l: '< 30°C' }, { c: '#f97316', l: '30-35°C' }, { c: '#ef4444', l: '> 35°C' }];
-    } else if (layer === 'ws10') {
-      items = [{ c: '#64748b', l: 'ลมอ่อน' }, { c: '#14b8a6', l: 'ปานกลาง' }, { c: '#a855f7', l: 'ลมแรง' }];
-    } else if (layer === 'rh') {
-      items = [{ c: '#93c5fd', l: '< 50%' }, { c: '#3b82f6', l: '50-80%' }, { c: '#2563eb', l: '> 80%' }];
-    } else if (layer === 'rain_mm') {
-      items = [{ c: isDark ? '#475569' : '#9ca3af', l: 'ไม่มีฝน (0 มม.)' }, { c: '#3b82f6', l: 'ฝนเล็กน้อย' }, { c: '#a855f7', l: 'ฝนตกหนัก' }];
-    } else {
-      items = [{ c: '#9ca3af', l: 'ต่ำ' }, { c: '#6366f1', l: 'ปานกลาง' }, { c: '#4f46e5', l: 'สูง' }];
-    }
+  const [isDark, setIsDark] = useState(false);
+  const [activeView, setActiveView] = useState('map');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [systemStatus, setSystemStatus] = useState({ success: 0, total: 9, logs: [], lastUpdated: "ไม่ทราบเวลา" });
+  const [lastMetrics, setLastMetrics] = useState({ avg: 0, max: 0, maxLocation: "" });
 
-    return (
-      <div className={`absolute bottom-12 right-6 z-[1000] px-4 py-3 rounded-xl shadow-lg border backdrop-blur-md pointer-events-auto ${isDark ? 'bg-slate-900/90 border-slate-700 text-white' : 'bg-white/95 border-gray-200 text-slate-800'}`}>
-        <h4 className="text-xs font-bold mb-2 uppercase tracking-wider opacity-80">คำอธิบายสี (Legend)</h4>
-        <div className="flex flex-col gap-2">
-          {items.map((item, i) => (
-            <div key={i} className="flex items-center gap-2 text-sm">
-              <span className="w-4 h-4 rounded-full border shadow-sm" style={{ backgroundColor: item.c, borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)' }}></span>
-              <span className="font-medium">{item.l}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
+  const mapRef = useRef(null);
+  const mapInstance = useRef(null);
+  const tileLayer = useRef(null);
+  const markersLayer = useRef(null);
+
+  // --- การตั้งค่าตีม (Theme) ---
+  const setTheme = (theme) => setIsDark(theme === 'dark');
+  const t = {
+    bg: isDark ? 'bg-slate-900' : 'bg-slate-50',
+    text: isDark ? 'text-slate-200' : 'text-slate-800',
+    textMuted: isDark ? 'text-slate-400' : 'text-slate-500',
+    textStrong: isDark ? 'text-white' : 'text-slate-900',
+    sidebar: isDark ? 'bg-slate-800/50 border-slate-700' : 'bg-white border-gray-200',
+    card: isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-100 shadow-sm',
+    cardHover: isDark ? 'hover:bg-slate-700/50' : 'hover:shadow-md',
+    btnActive: isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-blue-50 border-blue-200 text-blue-700',
+    btnInactive: isDark ? 'bg-transparent border-transparent hover:bg-slate-800 text-slate-400' : 'bg-transparent border-transparent hover:bg-gray-100 text-slate-600',
+    themeToggleBg: isDark ? 'bg-slate-800' : 'bg-slate-100',
+    statusSuccessBg: isDark ? 'bg-emerald-900/20 border-emerald-800' : 'bg-emerald-50 border-emerald-100',
+    statusSuccessText: isDark ? 'text-emerald-400' : 'text-emerald-700',
+    statusErrorBg: isDark ? 'bg-rose-900/20 border-rose-800' : 'bg-rose-50 border-rose-100',
+    statusErrorText: isDark ? 'text-rose-400' : 'text-rose-700',
   };
 
   const layerInfo = {
@@ -74,10 +74,20 @@ export default function App() {
     'rh': { name: 'ความชื้นสัมพัทธ์', icon: <Droplets className="w-5 h-5 text-blue-500" />, unit: '%', color: 'text-blue-500' },
     'pressure': { name: 'ความกดอากาศ', icon: <Gauge className="w-5 h-5 text-purple-500" />, unit: ' hPa', color: 'text-purple-500' },
     'cloud': { name: 'ปริมาณเมฆ', icon: <Cloud className={`w-5 h-5 ${isDark ? 'text-slate-300' : 'text-slate-500'}`} />, unit: '%', color: isDark ? 'text-slate-300' : 'text-slate-500' },
+    'rain_mm': { name: 'ปริมาณฝน (WMO)', icon: <CloudRain className="w-5 h-5 text-blue-400" />, unit: ' มม.', color: 'text-blue-400' },
     'rain_prob': { name: 'โอกาสเกิดฝน', icon: <CloudRain className="w-5 h-5 text-indigo-500" />, unit: '%', color: 'text-indigo-500' }
   };
 
-  // ฟังก์ชัน AI จำลองสำหรับประเมินวิกฤตการเกษตรจากตัวแปรที่มี
+  // ประเมินระดับฝน
+  const analyzeRainIntensity = (mm) => {
+    if (mm === 0) return { label: 'ไม่มีฝน', bg: isDark ? 'bg-slate-800/50' : 'bg-gray-100', color: isDark ? 'text-slate-400' : 'text-gray-500' };
+    if (mm < 2.5) return { label: 'ฝนเล็กน้อย', bg: isDark ? 'bg-blue-900/40' : 'bg-blue-100', color: isDark ? 'text-blue-300' : 'text-blue-700' };
+    if (mm < 10) return { label: 'ฝนปานกลาง', bg: isDark ? 'bg-indigo-900/40' : 'bg-indigo-100', color: isDark ? 'text-indigo-300' : 'text-indigo-700' };
+    if (mm < 50) return { label: 'ฝนหนัก', bg: isDark ? 'bg-purple-900/40' : 'bg-purple-100', color: isDark ? 'text-purple-300' : 'text-purple-700' };
+    return { label: 'ฝนตกหนักมาก', bg: isDark ? 'bg-rose-900/40' : 'bg-rose-100', color: isDark ? 'text-rose-300' : 'text-rose-700' };
+  };
+
+  // ฟังก์ชัน AI จำลองสำหรับประเมินวิกฤตการเกษตร
   const calculateAgriRisk = (loc) => {
     let riskLevel = 0; // 0=ปกติ, 1=เฝ้าระวัง(เหลือง), 2=วิกฤต(แดง)
     let warnings = [];
@@ -90,7 +100,7 @@ export default function App() {
     const rh = loc.rh || 0;
     const pressure = loc.pressure || 1010;
 
-    // 1. ประเมินพายุลมแรง (พิจารณาจากลมกระโชกและความกดอากาศตก)
+    // 1. พายุลมแรง
     if (wind > 35 || pressure < 1000) {
       riskLevel = 2;
       warnings.push("🌪️ เสี่ยงพายุลมแรง");
@@ -100,7 +110,7 @@ export default function App() {
       warnings.push("💨 ลมกระโชกแรง");
     }
 
-    // 2. ประเมินฝนตกหนัก/Rain Bomb (ดูโอกาสฝน เมฆ และความกดอากาศ)
+    // 2. ฝนตกหนัก/Rain Bomb
     if (rain > 80 && cloud > 80) {
       riskLevel = 2;
       warnings.push("🌧️ เสี่ยงฝนตกหนักกระจุกตัว (Rain Bomb)");
@@ -111,14 +121,14 @@ export default function App() {
       if(riskLevel === 1) advice = "เตรียมรับมือฝนตก วางแผนเก็บเกี่ยว";
     }
 
-    // 3. ประเมินภัยแล้ง / Heat Stress (สัตว์เลี้ยงและพืช)
+    // 3. ภัยแล้ง / Heat Stress
     if (temp > 38 && rh < 40) {
       riskLevel = Math.max(riskLevel, 2);
       warnings.push("🔥 ร้อนจัดและแห้งแล้ง");
       if(!advice.includes("พายุ") && !advice.includes("ฝน")) advice = "เพิ่มรอบการให้น้ำ เฝ้าระวังสัตว์เลี้ยงช็อกแดด (Heatstroke)";
     }
 
-    // 4. โรคพืชจากความชื้น (ราน้ำค้าง, โรคไหม้)
+    // 4. โรคพืชจากความชื้น
     if (temp >= 28 && temp <= 32 && rh > 85 && rain < 50) {
        riskLevel = Math.max(riskLevel, 1);
        warnings.push("🍄 เสี่ยงโรครา/เชื้อราในพืช");
@@ -129,7 +139,7 @@ export default function App() {
       level: riskLevel,
       warnings: warnings.length > 0 ? warnings : ["✅ สภาพอากาศแจ่มใส"],
       advice: advice,
-      color: riskLevel === 2 ? '#ef4444' : riskLevel === 1 ? '#eab308' : '#22c55e' // Red, Yellow, Green
+      color: riskLevel === 2 ? '#ef4444' : riskLevel === 1 ? '#eab308' : '#22c55e'
     };
   };
 
@@ -140,6 +150,7 @@ export default function App() {
     if (currentLayer === 'rh') return value > 80 ? '#2563eb' : value > 50 ? '#3b82f6' : '#93c5fd';
     if (currentLayer === 'pressure') return value > 1015 ? '#8b5cf6' : '#c084fc';
     if (currentLayer === 'cloud') return value > 70 ? '#64748b' : '#cbd5e1';
+    if (currentLayer === 'rain_mm') return value > 5 ? '#a855f7' : value > 0 ? '#3b82f6' : (isDark ? '#475569' : '#9ca3af');
     if (currentLayer === 'rain_prob') return value > 70 ? '#4f46e5' : value > 30 ? '#6366f1' : '#9ca3af';
     return isDark ? '#e2e8f0' : '#475569';
   };
@@ -178,7 +189,7 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Update Data Metrics
+  // คำนวณสถิติ
   useEffect(() => {
     if (!loading && data.length > 0) {
       const currentAvg = data.reduce((acc, curr) => acc + (curr[layer] || 0), 0) / data.length;
@@ -192,26 +203,19 @@ export default function App() {
           currentMax = val;
           maxLocName = d.name;
         } else if (val === currentMax && maxLocName !== d.name) {
-          // หากมีค่าสูงสุดเท่ากันหลายที่ ให้แสดงต่อกัน (ใส่เฉพาะเมื่อค่ายังไม่รวมชื่อนั้น)
-          if(!maxLocName.includes(d.name)) {
-              maxLocName += `, ${d.name}`;
-          }
+          if(!maxLocName.includes(d.name)) maxLocName += `, ${d.name}`;
         }
       });
 
-      // จัดการตัดคำกรณีที่ชื่อจังหวัดยาวเกินไปหรือมีหลายที่
       if (maxLocName.length > 25) {
         const parts = maxLocName.split(',');
-        if(parts.length > 2) {
-           maxLocName = `${parts[0]}, ${parts[1]} และอีก ${parts.length - 2} แห่ง`;
-        }
+        if(parts.length > 2) maxLocName = `${parts[0]}, ${parts[1]} และอีก ${parts.length - 2} แห่ง`;
       }
-
       setLastMetrics({ avg: currentAvg, max: currentMax, maxLocation: maxLocName });
     }
   }, [layer, loading, data]);
 
-  // Initialize Map
+  // สร้างแผนที่ Leaflet
   useEffect(() => {
     let L;
     loadLeaflet().then((leaflet) => {
@@ -240,9 +244,9 @@ export default function App() {
         mapInstance.current = null;
       }
     };
-  }, []); // Run once
+  }, []);
 
-  // Update Map Theme
+  // อัปเดตตีมของแผนที่
   useEffect(() => {
     if (mapInstance.current && tileLayer.current) {
       const newUrl = isDark
@@ -251,13 +255,11 @@ export default function App() {
       tileLayer.current.setUrl(newUrl);
 
       const container = mapRef.current;
-      if(container) {
-          container.style.backgroundColor = isDark ? '#0f172a' : '#f8fafc';
-      }
+      if(container) container.style.backgroundColor = isDark ? '#0f172a' : '#f8fafc';
     }
   }, [isDark]);
 
-  // Update Markers
+  // อัปเดตหมุดบนแผนที่
   useEffect(() => {
     if (window.L && mapInstance.current && markersLayer.current && data.length > 0) {
       const L = window.L;
@@ -290,16 +292,6 @@ export default function App() {
                     <span>${layerInfo[layer].name}:</span>
                     <strong>${(loc[layer] || 0).toFixed(1)}${layerInfo[layer].unit}</strong>
                   </div>
-                  ${layer !== 'tc' ? `
-                  <div style="display: flex; justify-content: space-between; gap: 16px; color: gray;">
-                    <span>อุณหภูมิ:</span>
-                    <span>${(loc.tc || 0).toFixed(1)}°C</span>
-                  </div>` : ''}
-                  ${layer !== 'rain_prob' ? `
-                  <div style="display: flex; justify-content: space-between; gap: 16px; color: gray;">
-                    <span>โอกาสฝน:</span>
-                    <span>${(loc.rain_prob || 0).toFixed(0)}%</span>
-                  </div>` : ''}
                 </div>
               </div>
             `;
@@ -313,37 +305,55 @@ export default function App() {
             weight: 2
           });
 
-          marker.bindTooltip(tooltipContent, {
-            direction: 'top',
-            offset: [0, -10],
-            opacity: 1,
-            className: isDark ? 'dark-tooltip' : 'light-tooltip'
-          });
-
+          marker.bindTooltip(tooltipContent, { direction: 'top', offset: [0, -10], opacity: 1, className: isDark ? 'dark-tooltip' : 'light-tooltip' });
           markersLayer.current.addLayer(marker);
         }
       });
     }
   }, [data, layer, isDark]);
 
-  // Handle Resize for Leaflet when switching views
   useEffect(() => {
       if(activeView === 'map' && mapInstance.current) {
-          setTimeout(() => {
-              mapInstance.current.invalidateSize();
-          }, 400); // Wait for transition
+          setTimeout(() => { mapInstance.current.invalidateSize(); }, 400);
       }
   }, [activeView, isSidebarOpen]);
 
+  const renderLegend = () => {
+    let items = [];
+    if (layer === 'agri_risk') {
+      items = [{ c: '#22c55e', l: 'ปกติ' }, { c: '#eab308', l: 'เฝ้าระวัง' }, { c: '#ef4444', l: 'วิกฤต' }];
+    } else if (layer === 'tc') {
+      items = [{ c: '#3b82f6', l: '< 30°C' }, { c: '#f97316', l: '30-35°C' }, { c: '#ef4444', l: '> 35°C' }];
+    } else if (layer === 'ws10') {
+      items = [{ c: '#64748b', l: 'ลมอ่อน' }, { c: '#14b8a6', l: 'ปานกลาง' }, { c: '#a855f7', l: 'ลมแรง' }];
+    } else if (layer === 'rh') {
+      items = [{ c: '#93c5fd', l: '< 50%' }, { c: '#3b82f6', l: '50-80%' }, { c: '#2563eb', l: '> 80%' }];
+    } else if (layer === 'rain_mm') {
+      items = [{ c: isDark ? '#475569' : '#9ca3af', l: 'ไม่มีฝน (0 มม.)' }, { c: '#3b82f6', l: 'ฝนเล็กน้อย' }, { c: '#a855f7', l: 'ฝนตกหนัก' }];
+    } else {
+      items = [{ c: '#9ca3af', l: 'ต่ำ' }, { c: '#6366f1', l: 'ปานกลาง' }, { c: '#4f46e5', l: 'สูง' }];
+    }
+
+    return (
+      <div className={`absolute bottom-12 right-6 z-[1000] px-4 py-3 rounded-xl shadow-lg border backdrop-blur-md ${isDark ? 'bg-slate-900/90 border-slate-700 text-white' : 'bg-white/95 border-gray-200 text-slate-800'}`}>
+        <h4 className="text-xs font-bold mb-2 uppercase tracking-wider opacity-80">คำอธิบายสี (Legend)</h4>
+        <div className="flex flex-col gap-2">
+          {items.map((item, i) => (
+            <div key={i} className="flex items-center gap-2 text-sm">
+              <span className="w-4 h-4 rounded-full border shadow-sm" style={{ backgroundColor: item.c, borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)' }}></span>
+              <span className="font-medium">{item.l}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className={`h-screen w-full flex overflow-hidden ${t.bg} ${t.text} font-sans transition-colors duration-300`}>
 
       {/* 📍 Sidebar */}
-      <div
-        className={`${t.sidebar} flex flex-col z-40 transition-all duration-300 absolute md:relative h-full shadow-2xl md:shadow-none border-r
-        ${isSidebarOpen ? 'w-72 translate-x-0' : 'w-72 -translate-x-full md:w-0 md:border-none'}`}
-      >
+      <div className={`${t.sidebar} flex flex-col z-40 transition-all duration-300 absolute md:relative h-full shadow-2xl md:shadow-none border-r ${isSidebarOpen ? 'w-72 translate-x-0' : 'w-72 -translate-x-full md:w-0 md:border-none'}`}>
         <div className={`p-6 flex-grow overflow-y-auto ${!isSidebarOpen ? 'md:hidden' : ''}`}>
 
           <div className="flex items-center justify-between mb-6">
@@ -406,20 +416,12 @@ export default function App() {
       {/* 🚀 Main Content Area */}
       <div className="flex-1 flex flex-col relative h-full">
 
-        <div className="absolute top-4 left-4 right-4 z-30 flex justify-between items-center pointer-events-none">
-          <button
-            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className={`pointer-events-auto p-3 rounded-xl shadow-lg border transition-all hover:scale-105 ${isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-gray-200 text-slate-800'}`}
-          >
+        <div className="absolute top-4 left-4 right-4 z-[2000] flex justify-between items-center pointer-events-none">
+          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className={`pointer-events-auto p-3 rounded-xl shadow-lg border transition-all hover:scale-105 ${isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-gray-200 text-slate-800'}`}>
             <Menu size={20} />
           </button>
 
-          <button
-            onClick={fetchData}
-            disabled={loading}
-            className={`pointer-events-auto flex items-center gap-2 px-4 py-2.5 rounded-xl shadow-lg border transition-all text-sm font-semibold hover:scale-105
-            ${isDark ? 'bg-slate-800 border-slate-700 text-emerald-400' : 'bg-white border-gray-200 text-emerald-600'}`}
-          >
+          <button onClick={fetchData} disabled={loading} className={`pointer-events-auto flex items-center gap-2 px-4 py-2.5 rounded-xl shadow-lg border transition-all text-sm font-semibold hover:scale-105 ${isDark ? 'bg-slate-800 border-slate-700 text-emerald-400' : 'bg-white border-gray-200 text-emerald-600'}`}>
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             {loading ? 'ซิงค์...' : 'รีเฟรช'}
           </button>
@@ -429,13 +431,14 @@ export default function App() {
         <div className={`w-full h-full absolute inset-0 transition-opacity duration-500 ${activeView === 'map' ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
           <div ref={mapRef} className="w-full h-full z-0" style={{ backgroundColor: isDark ? '#0f172a' : '#f8fafc' }}></div>
 
-          <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
-            <div className={`px-6 py-3 rounded-full shadow-xl border backdrop-blur-md flex items-center gap-3
-              ${isDark ? 'bg-slate-900/80 border-slate-700 text-white' : 'bg-white/90 border-gray-200 text-slate-800'}`}>
+          <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-[1000] pointer-events-none">
+            <div className={`px-6 py-3 rounded-full shadow-xl border backdrop-blur-md flex items-center gap-3 ${isDark ? 'bg-slate-900/80 border-slate-700 text-white' : 'bg-white/90 border-gray-200 text-slate-800'}`}>
               {layerInfo[layer].icon}
               <span className="font-bold">โหมดแสดงผล: {layerInfo[layer].name}</span>
             </div>
           </div>
+
+          {renderLegend()}
         </div>
 
         {/* 📊 DASHBOARD VIEW */}
@@ -443,7 +446,6 @@ export default function App() {
           <div className="max-w-7xl mx-auto">
             <h2 className={`text-2xl font-bold mb-6 ${t.textStrong}`}>แผงควบคุมข้อมูลเชิงลึก (Dashboard)</h2>
 
-            {}
             {layer === 'agri_risk' ? (
                <div className="mb-8">
                   <div className={`p-6 rounded-2xl border bg-gradient-to-br from-green-500/10 to-emerald-600/10 border-green-500/30 mb-6`}>
@@ -480,7 +482,6 @@ export default function App() {
                   </div>
                </div>
             ) : (
-               /* โหมดแสดงผลตัวเลขสถิติปกติ */
               <>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                   <div className={`p-6 rounded-2xl border ${t.card}`}>
@@ -506,9 +507,7 @@ export default function App() {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {data.map((loc, idx) => {
-                    // เรียกใช้ฟังก์ชันประเมินระดับฝนที่นี่
                     const rainStatus = analyzeRainIntensity(loc.rain_mm || 0);
-
                     return (
                     <div key={idx} className={`p-5 rounded-xl border flex flex-col justify-center transition-colors ${t.card} ${t.cardHover}`}>
                       <div className="flex justify-between items-center w-full">
@@ -525,7 +524,7 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* แสดงผลป้ายกำกับสถานะ WMO ลงในการ์ดของ Dashboard แบบแก้ไขวงเล็บพัง */}
+                      {/* ป้ายกำกับอธิบายฝน (WMO) */}
                       {layer === 'rain_mm' && (
                         <div className={`mt-4 px-3 py-2 rounded-lg text-xs font-bold text-center transition-colors duration-300 ${rainStatus.bg} ${rainStatus.color}`}>
                           {rainStatus.label}
