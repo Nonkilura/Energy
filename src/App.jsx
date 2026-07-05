@@ -450,7 +450,7 @@ export default function App() {
                <div className="mb-8">
                   <div className={`p-6 rounded-2xl border bg-gradient-to-br from-green-500/10 to-emerald-600/10 border-green-500/30 mb-6`}>
                     <h3 className={`text-xl font-bold mb-2 flex items-center gap-2 ${isDark ? 'text-green-400' : 'text-green-700'}`}>
-                      <Sprout size={24}/> แดชบอร์ดเตือนภัยการเกษตร
+                      <Sprout size={24}/> แดชบอร์ดคำแนะนำการเกษตร
                     </h3>
                     <p className={`text-sm ${t.textMuted}`}>ระบบวิเคราะห์ข้อมูลจากหลายตัวแปรเพื่อแจ้งเตือนภัยพิบัติและโรคพืชล่วงหน้าให้เกษตรกร</p>
                   </div>
@@ -492,7 +492,7 @@ export default function App() {
                   </div>
 
                   <div className={`p-6 rounded-2xl border ${t.card}`}>
-                    <p className={`text-sm font-medium ${t.textMuted} mb-2`}>จุดวิกฤตสูงสุด (จากทุกจุดตรวจวัด)</p>
+                    <p className={`text-sm font-medium ${t.textMuted} mb-2`}>ค่าสูงสุด (จากทุกจุดตรวจวัด)</p>
                     <div className="flex items-end gap-3">
                       <h2 className={`text-4xl font-light ${layerInfo[layer].color}`}>{lastMetrics.max.toFixed(1)}<span className={`text-xl ${t.textMuted} ml-1`}>{layerInfo[layer].unit}</span></h2>
                     </div>
