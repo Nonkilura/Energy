@@ -77,6 +77,17 @@ export default function App() {
     'rain_prob': { name: 'โอกาสเกิดฝน', icon: <CloudRain className="w-5 h-5 text-indigo-500" />, unit: '%', color: 'text-indigo-500' }
   };
 
+  // ฟังก์ชันวิเคราะห์ระดับความรุนแรงของฝน
+    const analyzeRainIntensity = (rain_mm) => {
+        if (rain_mm === 0) return { label: "ไม่มีฝน", color: "text-slate-400", bg: "bg-slate-100" };
+        if (rain_mm <= 2.5) return { label: "ฝนตกเล็กน้อย", color: "text-blue-500", bg: "bg-blue-50" };
+        if (rain_mm <= 15.0) return { label: "ฝนปานกลาง", color: "text-indigo-500", bg: "bg-indigo-50" };
+        if (rain_mm <= 50.0) return { label: "⚠️ ฝนตกหนัก", color: "text-orange-600", bg: "bg-orange-100" };
+
+        // ระดับวิกฤต
+        return { label: "🚨 วิกฤตฝนตกหนักมาก (เสี่ยงน้ำท่วม)", color: "text-rose-600", bg: "bg-rose-100 animate-pulse" };
+    };
+
   // ฟังก์ชัน AI จำลองสำหรับประเมินวิกฤตการเกษตรจากตัวแปรที่มี
   const calculateAgriRisk = (loc) => {
     let riskLevel = 0; // 0=ปกติ, 1=เฝ้าระวัง(เหลือง), 2=วิกฤต(แดง)
