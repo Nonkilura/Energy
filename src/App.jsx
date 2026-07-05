@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Thermometer, Wind, Droplets, AlertTriangle, CheckCircle2, MapPin, RefreshCw, Database, CloudRain, Cloud, Gauge, Sun, Moon, Menu, X, Map as MapIcon, LayoutDashboard } from 'lucide-react';
+import { Thermometer, Wind, Droplets, AlertTriangle, CheckCircle2, MapPin, RefreshCw, Database, CloudRain, Cloud, Gauge, Sun, Moon, Menu, X, Map as MapIcon, LayoutDashboard, Sprout } from 'lucide-react';
 
 // โหลด Leaflet ผ่าน CDN (แก้ปัญหา Dependency บนระบบ Preview)
 const loadLeaflet = () => {
@@ -68,6 +68,7 @@ export default function App() {
   };
 
   const layerInfo = {
+    'agri_risk': { name: '⚠️ ประเมินวิกฤตการเกษตร', icon: <Sprout className="w-5 h-5 text-green-500" />, unit: '', color: 'text-green-500' },
     'tc': { name: 'อุณหภูมิ', icon: <Thermometer className="w-5 h-5 text-orange-500" />, unit: '°C', color: 'text-orange-500' },
     'ws10': { name: 'ความเร็วลม', icon: <Wind className="w-5 h-5 text-teal-500" />, unit: ' km/h', color: 'text-teal-500' },
     'rh': { name: 'ความชื้นสัมพัทธ์', icon: <Droplets className="w-5 h-5 text-blue-500" />, unit: '%', color: 'text-blue-500' },
@@ -76,7 +77,64 @@ export default function App() {
     'rain_prob': { name: 'โอกาสเกิดฝน', icon: <CloudRain className="w-5 h-5 text-indigo-500" />, unit: '%', color: 'text-indigo-500' }
   };
 
-  const getMarkerColor = (value, currentLayer) => {
+  // ฟังก์ชัน AI จำลองสำหรับประเมินวิกฤตการเกษตรจากตัวแปรที่มี
+  const calculateAgriRisk = (loc) => {
+    let riskLevel = 0; // 0=ปกติ, 1=เฝ้าระวัง(เหลือง), 2=วิกฤต(แดง)
+    let warnings = [];
+    let advice = "สภาพอากาศปกติ เหมาะแก่การเพาะปลูก";
+
+    const wind = loc.ws10 || 0;
+    const rain = loc.rain_prob || 0;
+    const cloud = loc.cloud || 0;
+    const temp = loc.tc || 0;
+    const rh = loc.rh || 0;
+    const pressure = loc.pressure || 1010;
+
+    // 1. ประเมินพายุลมแรง (พิจารณาจากลมกระโชกและความกดอากาศตก)
+    if (wind > 35 || pressure < 1000) {
+      riskLevel = 2;
+      warnings.push("🌪️ เสี่ยงพายุลมแรง");
+      advice = "เสริมความแข็งแรงโรงเรือน งดฉีดพ่นสารเคมี";
+    } else if (wind > 20) {
+      riskLevel = Math.max(riskLevel, 1);
+      warnings.push("💨 ลมกระโชกแรง");
+    }
+
+    // 2. ประเมินฝนตกหนัก/Rain Bomb (ดูโอกาสฝน เมฆ และความกดอากาศ)
+    if (rain > 80 && cloud > 80) {
+      riskLevel = 2;
+      warnings.push("🌧️ เสี่ยงฝนตกหนักกระจุกตัว (Rain Bomb)");
+      advice = "เปิดทางระบายน้ำทันที เฝ้าระวังน้ำขังรากเน่า";
+    } else if (rain > 60) {
+      riskLevel = Math.max(riskLevel, 1);
+      warnings.push("🌦️ ฝนตกต่อเนื่อง");
+      if(riskLevel === 1) advice = "เตรียมรับมือฝนตก วางแผนเก็บเกี่ยว";
+    }
+
+    // 3. ประเมินภัยแล้ง / Heat Stress (สัตว์เลี้ยงและพืช)
+    if (temp > 38 && rh < 40) {
+      riskLevel = Math.max(riskLevel, 2);
+      warnings.push("🔥 ร้อนจัดและแห้งแล้ง");
+      if(!advice.includes("พายุ") && !advice.includes("ฝน")) advice = "เพิ่มรอบการให้น้ำ เฝ้าระวังสัตว์เลี้ยงช็อกแดด (Heatstroke)";
+    }
+
+    // 4. โรคพืชจากความชื้น (ราน้ำค้าง, โรคไหม้)
+    if (temp >= 28 && temp <= 32 && rh > 85 && rain < 50) {
+       riskLevel = Math.max(riskLevel, 1);
+       warnings.push("🍄 เสี่ยงโรครา/เชื้อราในพืช");
+       if(!warnings.includes("พายุ")) advice = "เฝ้าระวังโรคใบไหม้ หมั่นตรวจแปลง";
+    }
+
+    return {
+      level: riskLevel,
+      warnings: warnings.length > 0 ? warnings : ["✅ สภาพอากาศแจ่มใส"],
+      advice: advice,
+      color: riskLevel === 2 ? '#ef4444' : riskLevel === 1 ? '#eab308' : '#22c55e' // Red, Yellow, Green
+    };
+  };
+
+  const getMarkerColor = (value, currentLayer, locData = null) => {
+    if (currentLayer === 'agri_risk' && locData) return calculateAgriRisk(locData).color;
     if (currentLayer === 'tc') return value > 35 ? '#ef4444' : value > 30 ? '#f97316' : '#3b82f6';
     if (currentLayer === 'ws10') return value > 20 ? '#a855f7' : value > 10 ? '#14b8a6' : '#64748b';
     if (currentLayer === 'rh') return value > 80 ? '#2563eb' : value > 50 ? '#3b82f6' : '#93c5fd';
@@ -207,29 +265,45 @@ export default function App() {
 
       data.forEach(loc => {
         if (loc.lat && loc.lon) {
-          const color = getMarkerColor(loc[layer], layer);
+          const color = getMarkerColor(loc[layer], layer, loc);
+          let tooltipContent = '';
 
-          const tooltipContent = `
-            <div style="text-align: center; font-family: sans-serif; color: ${isDark ? 'white' : 'black'}">
-              <strong style="display: block; border-bottom: 1px solid rgba(128,128,128,0.3); padding-bottom: 4px; margin-bottom: 4px;">${loc.name}</strong>
-              <div style="font-size: 12px;">
-                <div style="display: flex; justify-content: space-between; gap: 16px;">
-                  <span>${layerInfo[layer].name}:</span>
-                  <strong>${(loc[layer] || 0).toFixed(1)}${layerInfo[layer].unit}</strong>
+          if (layer === 'agri_risk') {
+            const risk = calculateAgriRisk(loc);
+            tooltipContent = `
+              <div style="text-align: center; font-family: sans-serif; color: ${isDark ? 'white' : 'black'}; min-width: 180px;">
+                <strong style="display: block; border-bottom: 1px solid rgba(128,128,128,0.3); padding-bottom: 4px; margin-bottom: 4px; font-size: 14px;">${loc.name}</strong>
+                <div style="font-size: 13px; font-weight: bold; color: ${risk.color}; margin-bottom: 6px;">
+                  ${risk.warnings.join('<br/>')}
                 </div>
-                ${layer !== 'tc' ? `
-                <div style="display: flex; justify-content: space-between; gap: 16px; color: gray;">
-                  <span>อุณหภูมิ:</span>
-                  <span>${(loc.tc || 0).toFixed(1)}°C</span>
-                </div>` : ''}
-                ${layer !== 'rain_prob' ? `
-                <div style="display: flex; justify-content: space-between; gap: 16px; color: gray;">
-                  <span>โอกาสฝน:</span>
-                  <span>${(loc.rain_prob || 0).toFixed(0)}%</span>
-                </div>` : ''}
+                <div style="font-size: 11px; background: ${isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)'}; padding: 6px; border-radius: 4px;">
+                  💡 ${risk.advice}
+                </div>
               </div>
-            </div>
-          `;
+            `;
+          } else {
+            tooltipContent = `
+              <div style="text-align: center; font-family: sans-serif; color: ${isDark ? 'white' : 'black'}">
+                <strong style="display: block; border-bottom: 1px solid rgba(128,128,128,0.3); padding-bottom: 4px; margin-bottom: 4px;">${loc.name}</strong>
+                <div style="font-size: 12px;">
+                  <div style="display: flex; justify-content: space-between; gap: 16px;">
+                    <span>${layerInfo[layer].name}:</span>
+                    <strong>${(loc[layer] || 0).toFixed(1)}${layerInfo[layer].unit}</strong>
+                  </div>
+                  ${layer !== 'tc' ? `
+                  <div style="display: flex; justify-content: space-between; gap: 16px; color: gray;">
+                    <span>อุณหภูมิ:</span>
+                    <span>${(loc.tc || 0).toFixed(1)}°C</span>
+                  </div>` : ''}
+                  ${layer !== 'rain_prob' ? `
+                  <div style="display: flex; justify-content: space-between; gap: 16px; color: gray;">
+                    <span>โอกาสฝน:</span>
+                    <span>${(loc.rain_prob || 0).toFixed(0)}%</span>
+                  </div>` : ''}
+                </div>
+              </div>
+            `;
+          }
 
           const marker = L.circleMarker([loc.lat, loc.lon], {
             radius: 18,
@@ -369,46 +443,86 @@ export default function App() {
           <div className="max-w-7xl mx-auto">
             <h2 className={`text-2xl font-bold mb-6 ${t.textStrong}`}>แผงควบคุมข้อมูลเชิงลึก (Dashboard)</h2>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-              <div className={`p-6 rounded-2xl border ${t.card}`}>
-                <p className={`text-sm font-medium ${t.textMuted} mb-2`}>ค่าเฉลี่ยระดับประเทศ ({layerInfo[layer].name})</p>
-                <div className="flex items-end gap-3">
-                  <h2 className={`text-4xl font-light ${t.textStrong}`}>{lastMetrics.avg.toFixed(1)}<span className={`text-xl ${t.textMuted} ml-1`}>{layerInfo[layer].unit}</span></h2>
-                </div>
-              </div>
-
-              <div className={`p-6 rounded-2xl border ${t.card}`}>
-                <p className={`text-sm font-medium ${t.textMuted} mb-2`}>ค่าสูงสุด (จากทุกจุดตรวจวัด)</p>
-                <div className="flex items-end gap-3">
-                  <h2 className={`text-4xl font-light ${layerInfo[layer].color}`}>{lastMetrics.max.toFixed(1)}<span className={`text-xl ${t.textMuted} ml-1`}>{layerInfo[layer].unit}</span></h2>
-                </div>
-                {lastMetrics.maxLocation && (
-                  <p className={`text-xs mt-3 ${t.textMuted} flex items-start gap-1`}>
-                    <MapPin className="w-4 h-4 shrink-0 opacity-70" />
-                    <span className="leading-tight">พบที่: <span className={`font-semibold ${t.textStrong}`}>{lastMetrics.maxLocation}</span></span>
-                  </p>
-                )}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {data.map((loc, idx) => (
-                <div key={idx} className={`p-5 rounded-xl border flex justify-between items-center transition-colors ${t.card} ${t.cardHover}`}>
-                  <div>
-                    <h4 className={`font-bold ${t.textStrong}`}>{loc.name}</h4>
-                    <p className={`text-xs mt-1 font-mono ${t.textMuted}`}>
-                      {/* เช็คว่า API รัฐบาลใช้ได้ และ ชั้นข้อมูลปัจจุบันเป็นข้อมูลที่รัฐบาลมีให้ */}
-                      {loc.source?.includes('TMD') && ['tc', 'ws10', 'rh', 'pressure'].includes(layer)
-                        ? '🟢 TMD API'
-                        : '🟡 Open-Meteo Satellite'}
-                    </p>
+            {}
+            {layer === 'agri_risk' ? (
+               <div className="mb-8">
+                  <div className={`p-6 rounded-2xl border bg-gradient-to-br from-green-500/10 to-emerald-600/10 border-green-500/30 mb-6`}>
+                    <h3 className={`text-xl font-bold mb-2 flex items-center gap-2 ${isDark ? 'text-green-400' : 'text-green-700'}`}>
+                      <Sprout size={24}/> แดชบอร์ดเตือนภัยการเกษตร
+                    </h3>
+                    <p className={`text-sm ${t.textMuted}`}>ระบบวิเคราะห์ข้อมูลจากหลายตัวแปรเพื่อแจ้งเตือนภัยพิบัติและโรคพืชล่วงหน้าให้เกษตรกร</p>
                   </div>
-                  <div className={`text-2xl font-semibold ${layerInfo[layer].color}`}>
-                    {(loc[layer] || 0).toFixed(1)}<span className={`text-sm ml-1 ${t.textMuted}`}>{layerInfo[layer].unit}</span>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {data.map((loc, idx) => {
+                      const risk = calculateAgriRisk(loc);
+                      return (
+                        <div key={idx} className={`p-5 rounded-xl border flex flex-col gap-3 transition-colors ${t.card} ${t.cardHover}`}>
+                          <div className="flex justify-between items-start">
+                             <h4 className={`text-lg font-bold ${t.textStrong}`}>{loc.name}</h4>
+                             <span className="flex h-3 w-3 mt-1 relative">
+                               {risk.level > 0 && <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${risk.level === 2 ? 'bg-red-400' : 'bg-yellow-400'}`}></span>}
+                               <span className={`relative inline-flex rounded-full h-3 w-3 ${risk.level === 2 ? 'bg-red-500' : risk.level === 1 ? 'bg-yellow-500' : 'bg-green-500'}`}></span>
+                             </span>
+                          </div>
+                          <div>
+                            {risk.warnings.map((w, i) => (
+                              <p key={i} className={`text-sm font-semibold mb-1 ${risk.level === 2 ? 'text-red-500' : risk.level === 1 ? 'text-amber-500' : 'text-green-500'}`}>{w}</p>
+                            ))}
+                          </div>
+                          <div className={`mt-auto pt-3 border-t text-xs ${isDark ? 'border-slate-800' : 'border-gray-100'}`}>
+                             <span className={t.textMuted}>คำแนะนำ: </span>
+                             <span className={t.textStrong}>{risk.advice}</span>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+               </div>
+            ) : (
+               /* โหมดแสดงผลตัวเลขสถิติปกติ */
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                  <div className={`p-6 rounded-2xl border ${t.card}`}>
+                    <p className={`text-sm font-medium ${t.textMuted} mb-2`}>ค่าเฉลี่ยระดับประเทศ ({layerInfo[layer].name})</p>
+                    <div className="flex items-end gap-3">
+                      <h2 className={`text-4xl font-light ${t.textStrong}`}>{lastMetrics.avg.toFixed(1)}<span className={`text-xl ${t.textMuted} ml-1`}>{layerInfo[layer].unit}</span></h2>
+                    </div>
+                  </div>
+
+                  <div className={`p-6 rounded-2xl border ${t.card}`}>
+                    <p className={`text-sm font-medium ${t.textMuted} mb-2`}>จุดวิกฤตสูงสุด (จากทุกจุดตรวจวัด)</p>
+                    <div className="flex items-end gap-3">
+                      <h2 className={`text-4xl font-light ${layerInfo[layer].color}`}>{lastMetrics.max.toFixed(1)}<span className={`text-xl ${t.textMuted} ml-1`}>{layerInfo[layer].unit}</span></h2>
+                    </div>
+                    {lastMetrics.maxLocation && (
+                      <p className={`text-xs mt-3 ${t.textMuted} flex items-start gap-1`}>
+                        <MapPin className="w-4 h-4 shrink-0 opacity-70" />
+                        <span className="leading-tight">พบที่: <span className={`font-semibold ${t.textStrong}`}>{lastMetrics.maxLocation}</span></span>
+                      </p>
+                    )}
                   </div>
                 </div>
-              ))}
-            </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {data.map((loc, idx) => (
+                    <div key={idx} className={`p-5 rounded-xl border flex justify-between items-center transition-colors ${t.card} ${t.cardHover}`}>
+                      <div>
+                        <h4 className={`font-bold ${t.textStrong}`}>{loc.name}</h4>
+                        <p className={`text-xs mt-1 font-mono ${t.textMuted}`}>
+                          {loc.source?.includes('TMD') && ['tc', 'ws10', 'rh', 'pressure'].includes(layer)
+                            ? '🟢 TMD API'
+                            : '🟡 Open-Meteo Satellite'}
+                        </p>
+                      </div>
+                      <div className={`text-2xl font-semibold ${layerInfo[layer].color}`}>
+                        {(loc[layer] || 0).toFixed(1)}<span className={`text-sm ml-1 ${t.textMuted}`}>{layerInfo[layer].unit}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         </div>
 
