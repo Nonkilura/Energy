@@ -1,13 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
-import L from 'leaflet'; // Import โดยตรง (ต้องติดตั้งผ่าน npm install leaflet)
-import 'leaflet/dist/leaflet.css'; // Import CSS โดยตรง
-import { Thermometer, Wind, Droplets, AlertTriangle, CheckCircle2, MapPin, RefreshCw, Database, CloudRain, Cloud, Gauge, Sun, Moon, Menu, X, Map as MapIcon, LayoutDashboard, Sprout } from 'lucide-react';
+import { Thermometer, Wind, Droplets, AlertTriangle, CheckCircle2, MapPin, RefreshCw, Database, CloudRain, Cloud, Gauge, Sun, Moon, Menu, X, Map as MapIcon, LayoutDashboard, Sprout, Umbrella } from 'lucide-react';
 
-// ปรับแก้ Icon ของ Leaflet (แก้บั๊ก Marker หายเวลาทำ Build)
-import markerIcon from 'leaflet/dist/images/marker-icon.png';
-import markerShadow from 'leaflet/dist/images/marker-shadow.png';
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({ iconUrl: markerIcon, shadowUrl: markerShadow });
+// โหลด Leaflet ผ่าน CDN
+const loadLeaflet = () => {
+  return new Promise((resolve) => {
+    if (window.L) return resolve(window.L);
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+    document.head.appendChild(link);
+    const script = document.createElement('script');
+    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    script.onload = () => resolve(window.L);
+    document.head.appendChild(script);
+  });
+};
 
 const LOCATIONS_COORDS = {
   "เชียงใหม่": { lat: 18.79, lon: 98.98 },
@@ -26,110 +33,480 @@ export default function App() {
 
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [layer, setLayer] = useState('tc');
+  const [layer, setLayer] = useState('agri_risk'); // ตั้งค่า Default ให้เปิดมาเจอหน้าเตือนภัยก่อนเลย
   const [theme, setTheme] = useState('dark');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [activeView, setActiveView] = useState('map');
+  const [activeView, setActiveView] = useState('dashboard');
+
+  const [systemStatus, setSystemStatus] = useState({ success: 0, total: 9, logs: [], lastUpdated: "" });
+  const [lastMetrics, setLastMetrics] = useState({ avg: 0, max: 0, maxLocation: "" });
 
   const mapRef = useRef(null);
   const mapInstance = useRef(null);
   const markersLayer = useRef(null);
   const tileLayer = useRef(null);
+
   const isDark = theme === 'dark';
 
   const t = {
     bg: isDark ? 'bg-slate-950' : 'bg-gray-50',
     text: isDark ? 'text-slate-200' : 'text-slate-700',
+    textMuted: isDark ? 'text-slate-400' : 'text-slate-500',
+    textStrong: isDark ? 'text-white' : 'text-slate-900',
     sidebar: isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-gray-200',
     card: isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-gray-200 shadow-sm',
-    btnActive: isDark ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-900',
-    btnInactive: isDark ? 'text-slate-400' : 'text-slate-500'
+    cardHover: isDark ? 'hover:bg-slate-800/80' : 'hover:bg-gray-50',
+    btnActive: isDark ? 'bg-slate-800 border-slate-700 shadow-md text-white' : 'bg-slate-100 border-gray-200 shadow-sm text-slate-900',
+    btnInactive: isDark ? 'hover:bg-slate-800/50 text-slate-400 border-transparent' : 'hover:bg-gray-100 text-slate-500 border-transparent',
+    statusSuccessBg: isDark ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-emerald-50 border-emerald-200',
+    statusErrorBg: isDark ? 'bg-amber-500/10 border-amber-500/30' : 'bg-amber-50 border-amber-200',
+    statusSuccessText: isDark ? 'text-emerald-400' : 'text-emerald-600',
+    statusErrorText: isDark ? 'text-amber-400' : 'text-amber-600',
+    themeToggleBg: isDark ? 'bg-slate-950/50' : 'bg-gray-100',
   };
 
+  // 1. เพิ่มชั้นข้อมูล 'rain_mm' เข้าสู่ระบบ
   const layerInfo = {
-    'agri_risk': { name: '⚠️ ประเมินวิกฤต', icon: <Sprout className="w-5 h-5 text-green-500" />, unit: '', color: 'text-green-500' },
+    'agri_risk': { name: '⚠️ ประเมินวิกฤตเกษตร', icon: <Sprout className="w-5 h-5 text-green-500" />, unit: '', color: 'text-green-500' },
     'tc': { name: 'อุณหภูมิ', icon: <Thermometer className="w-5 h-5 text-orange-500" />, unit: '°C', color: 'text-orange-500' },
+    'rain_mm': { name: 'ปริมาณฝน (WMO)', icon: <Umbrella className="w-5 h-5 text-cyan-400" />, unit: ' มม./ชม.', color: 'text-cyan-400' }, // เลเยอร์ใหม่
     'ws10': { name: 'ความเร็วลม', icon: <Wind className="w-5 h-5 text-teal-500" />, unit: ' km/h', color: 'text-teal-500' },
-    'rh': { name: 'ความชื้น', icon: <Droplets className="w-5 h-5 text-blue-500" />, unit: '%', color: 'text-blue-500' },
-    'rain_prob': { name: 'โอกาสฝน', icon: <CloudRain className="w-5 h-5 text-indigo-500" />, unit: '%', color: 'text-indigo-500' }
+    'rh': { name: 'ความชื้นสัมพัทธ์', icon: <Droplets className="w-5 h-5 text-blue-500" />, unit: '%', color: 'text-blue-500' },
+    'pressure': { name: 'ความกดอากาศ', icon: <Gauge className="w-5 h-5 text-purple-500" />, unit: ' hPa', color: 'text-purple-500' },
+    'cloud': { name: 'ปริมาณเมฆ', icon: <Cloud className={`w-5 h-5 ${isDark ? 'text-slate-300' : 'text-slate-500'}`} />, unit: '%', color: isDark ? 'text-slate-300' : 'text-slate-500' },
+    'rain_prob': { name: 'โอกาสเกิดฝน (%)', icon: <CloudRain className="w-5 h-5 text-indigo-500" />, unit: '%', color: 'text-indigo-500' }
+  };
+
+  const analyzeRainIntensity = (rain_mm) => {
+    if (rain_mm === 0 || !rain_mm) return { label: "ไม่มีฝน", color: isDark ? "text-slate-400" : "text-slate-500", bg: isDark ? "bg-slate-800" : "bg-slate-100" };
+    if (rain_mm <= 2.5) return { label: "ฝนตกเล็กน้อย", color: "text-blue-500", bg: "bg-blue-500/10" };
+    if (rain_mm <= 15.0) return { label: "ฝนปานกลาง", color: "text-indigo-500", bg: "bg-indigo-500/10" };
+    if (rain_mm <= 50.0) return { label: "⚠️ ฝนตกหนัก", color: "text-orange-500", bg: "bg-orange-500/10" };
+    return { label: "🚨 วิกฤตฝนตกหนักมาก", color: "text-rose-500", bg: "bg-rose-500/10 animate-pulse border border-rose-500/50" };
+  };
+
+  const calculateAgriRisk = (loc) => {
+    let riskLevel = 0;
+    let warnings = [];
+    let advice = "สภาพอากาศปกติ เหมาะแก่การเพาะปลูก";
+
+    const wind = loc.ws10 || 0;
+    const rain_prob = loc.rain_prob || 0;
+    const rain_mm = loc.rain_mm || 0;
+    const cloud = loc.cloud || 0;
+    const temp = loc.tc || 0;
+    const rh = loc.rh || 0;
+    const pressure = loc.pressure || 1010;
+
+    if (wind > 35 || pressure < 1000) {
+      riskLevel = 2;
+      warnings.push("🌪️ เสี่ยงพายุลมแรง");
+      advice = "เสริมความแข็งแรงโรงเรือน งดฉีดพ่นสารเคมี";
+    } else if (wind > 20) {
+      riskLevel = Math.max(riskLevel, 1);
+      warnings.push("💨 ลมกระโชกแรง");
+    }
+
+    // 2. ปรับการทำงานของ AI มาใช้เกณฑ์ WMO (rain_mm) เป็นหลัก
+    if (rain_mm > 50) {
+      riskLevel = 2;
+      warnings.push("🌊 วิกฤตน้ำท่วมฉับพลัน (Rain Bomb)");
+      advice = "อันตรายสูงสุด! อพยพหรือเปิดทางระบายน้ำทันที";
+    } else if (rain_mm > 15 || (rain_prob > 80 && cloud > 80)) {
+      riskLevel = Math.max(riskLevel, 1);
+      warnings.push("🌧️ เสี่ยงฝนตกหนัก/น้ำขัง");
+      if(riskLevel === 1) advice = "เร่งขุดลอกร่องน้ำ เตรียมรับมือฝนตกหนัก";
+    }
+
+    if (temp > 38 && rh < 40) {
+      riskLevel = Math.max(riskLevel, 2);
+      warnings.push("🔥 ร้อนจัดและแห้งแล้ง");
+      if(!advice.includes("พายุ") && !advice.includes("ฝน")) advice = "เพิ่มรอบการให้น้ำ เฝ้าระวังสัตว์เลี้ยงช็อกแดด";
+    }
+
+    if (temp >= 28 && temp <= 32 && rh > 85 && rain_mm < 50) {
+       riskLevel = Math.max(riskLevel, 1);
+       warnings.push("🍄 เสี่ยงโรครา/เชื้อราในพืช");
+       if(!warnings.includes("พายุ") && !warnings.includes("ท่วม")) advice = "เฝ้าระวังโรคใบไหม้ หมั่นตรวจแปลง";
+    }
+
+    return {
+      level: riskLevel,
+      warnings: warnings.length > 0 ? warnings : ["✅ สภาพอากาศแจ่มใส"],
+      advice: advice,
+      color: riskLevel === 2 ? '#ef4444' : riskLevel === 1 ? '#eab308' : '#22c55e'
+    };
+  };
+
+  const getMarkerColor = (value, currentLayer, locData = null) => {
+    if (currentLayer === 'agri_risk' && locData) return calculateAgriRisk(locData).color;
+    if (currentLayer === 'tc') return value > 35 ? '#ef4444' : value > 30 ? '#f97316' : '#3b82f6';
+    if (currentLayer === 'rain_mm') return value > 50 ? '#e11d48' : value > 15 ? '#f97316' : value > 2.5 ? '#6366f1' : '#3b82f6';
+    if (currentLayer === 'ws10') return value > 20 ? '#a855f7' : value > 10 ? '#14b8a6' : '#64748b';
+    if (currentLayer === 'rh') return value > 80 ? '#2563eb' : value > 50 ? '#3b82f6' : '#93c5fd';
+    if (currentLayer === 'pressure') return value > 1015 ? '#8b5cf6' : '#c084fc';
+    if (currentLayer === 'cloud') return value > 70 ? '#64748b' : '#cbd5e1';
+    if (currentLayer === 'rain_prob') return value > 70 ? '#4f46e5' : value > 30 ? '#6366f1' : '#9ca3af';
+    return isDark ? '#e2e8f0' : '#475569';
   };
 
   const fetchData = async () => {
     setLoading(true);
     try {
       const res = await fetch(FIREBASE_URL);
+      if (!res.ok) throw new Error(`HTTP Error: ${res.status}`);
       const dbData = await res.json();
-      if (dbData?.data) {
-        setData(dbData.data.map(item => ({
+      if (dbData && dbData.data) {
+        const mergedData = dbData.data.map(item => ({
           ...item,
           lat: item.lat || LOCATIONS_COORDS[item.name]?.lat,
           lon: item.lon || LOCATIONS_COORDS[item.name]?.lon,
-        })));
+        }));
+        setData(mergedData);
+        setSystemStatus({
+          success: dbData.successCount || 0,
+          total: dbData.data.length || 9,
+          logs: dbData.logs || [],
+          lastUpdated: dbData.lastUpdated || "ไม่ทราบเวลา"
+        });
+      } else {
+        setData([]);
       }
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error("Firebase Error:", e);
+    }
     setLoading(false);
   };
 
-  // 🗺️ ระบบแผนที่ (Core)
   useEffect(() => {
-    if (!mapInstance.current && mapRef.current) {
-      mapInstance.current = L.map(mapRef.current).setView([13.73, 100.52], 6);
-      tileLayer.current = L.tileLayer(isDark
-        ? "https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png"
-        : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png"
-      ).addTo(mapInstance.current);
-      markersLayer.current = L.layerGroup().addTo(mapInstance.current);
-    }
+    fetchData();
+    const interval = setInterval(fetchData, 300000);
+    return () => clearInterval(interval);
   }, []);
 
-  // อัปเดตสีแผนที่เมื่อเปลี่ยนธีม
   useEffect(() => {
-    if (tileLayer.current) {
+    if (!loading && data.length > 0 && layer !== 'agri_risk') {
+      const currentAvg = data.reduce((acc, curr) => acc + (curr[layer] || 0), 0) / data.length;
+      let currentMax = -Infinity;
+      let maxLocName = "";
+
+      data.forEach(d => {
+        const val = d[layer] || 0;
+        if (val > currentMax) {
+          currentMax = val;
+          maxLocName = d.name;
+        } else if (val === currentMax && maxLocName !== d.name) {
+          if(!maxLocName.includes(d.name)) maxLocName += `, ${d.name}`;
+        }
+      });
+
+      if (maxLocName.length > 25) {
+        const parts = maxLocName.split(',');
+        if(parts.length > 2) maxLocName = `${parts[0]}, ${parts[1]} และอีก ${parts.length - 2} แห่ง`;
+      }
+      setLastMetrics({ avg: currentAvg, max: currentMax, maxLocation: maxLocName });
+    }
+  }, [layer, loading, data]);
+
+  useEffect(() => {
+    let L;
+    loadLeaflet().then((leaflet) => {
+      L = leaflet;
+      if (!mapInstance.current && mapRef.current) {
+        mapInstance.current = L.map(mapRef.current, {
+          center: [13.736717, 100.523186],
+          zoom: 6,
+          zoomControl: false
+        });
+
+        tileLayer.current = L.tileLayer(
+          isDark
+            ? "https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png"
+            : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+          { attribution: '&copy; Carto' }
+        ).addTo(mapInstance.current);
+
+        markersLayer.current = L.layerGroup().addTo(mapInstance.current);
+      }
+    });
+
+    return () => {
+      if (mapInstance.current) {
+        mapInstance.current.remove();
+        mapInstance.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (mapInstance.current && tileLayer.current) {
       tileLayer.current.setUrl(isDark
-        ? "https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png"
-        : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png"
+        ? "https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png"
+        : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
       );
+      if(mapRef.current) mapRef.current.style.backgroundColor = isDark ? '#0f172a' : '#f8fafc';
     }
   }, [isDark]);
 
-  // พล็อตจุดข้อมูล
   useEffect(() => {
-    if (markersLayer.current) {
+    if (window.L && mapInstance.current && markersLayer.current && data.length > 0) {
+      const L = window.L;
       markersLayer.current.clearLayers();
+
       data.forEach(loc => {
         if (loc.lat && loc.lon) {
-          L.circleMarker([loc.lat, loc.lon], { radius: 12, color: '#10b981', fillOpacity: 0.8 })
-            .addTo(markersLayer.current)
-            .bindTooltip(`${loc.name}: ${(loc[layer] || 0).toFixed(1)}${layerInfo[layer].unit}`);
+          const color = getMarkerColor(loc[layer], layer, loc);
+          let tooltipContent = '';
+
+          if (layer === 'agri_risk') {
+            const risk = calculateAgriRisk(loc);
+            tooltipContent = `
+              <div style="text-align: center; font-family: sans-serif; color: ${isDark ? 'white' : 'black'}; min-width: 180px;">
+                <strong style="display: block; border-bottom: 1px solid rgba(128,128,128,0.3); padding-bottom: 4px; margin-bottom: 4px; font-size: 14px;">${loc.name}</strong>
+                <div style="font-size: 13px; font-weight: bold; color: ${risk.color}; margin-bottom: 6px;">
+                  ${risk.warnings.join('<br/>')}
+                </div>
+                <div style="font-size: 11px; background: ${isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)'}; padding: 6px; border-radius: 4px;">
+                  💡 ${risk.advice}
+                </div>
+              </div>
+            `;
+          } else {
+            // 3. ปรับปรุง Tooltip ให้รองรับเกณฑ์วิกฤตฝน (WMO)
+            const rainStatus = analyzeRainIntensity(loc.rain_mm || 0);
+            tooltipContent = `
+              <div style="text-align: center; font-family: sans-serif; color: ${isDark ? 'white' : 'black'}">
+                <strong style="display: block; border-bottom: 1px solid rgba(128,128,128,0.3); padding-bottom: 4px; margin-bottom: 4px;">${loc.name}</strong>
+                <div style="font-size: 12px;">
+                  <div style="display: flex; justify-content: space-between; gap: 16px;">
+                    <span>${layerInfo[layer].name}:</span>
+                    <strong>${(loc[layer] || 0).toFixed(1)}${layerInfo[layer].unit}</strong>
+                  </div>
+                </div>
+                ${layer === 'rain_mm' ? `
+                  <div style="margin-top: 8px; font-weight: bold; font-size: 11px; padding: 4px; border-radius: 4px; background: ${isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)'};">
+                    ${rainStatus.label}
+                  </div>
+                ` : ''}
+              </div>
+            `;
+          }
+
+          const marker = L.circleMarker([loc.lat, loc.lon], {
+            radius: 18,
+            color: color,
+            fillColor: color,
+            fillOpacity: 0.6,
+            weight: 2
+          });
+
+          marker.bindTooltip(tooltipContent, {
+            direction: 'top',
+            offset: [0, -10],
+            opacity: 1,
+            className: isDark ? 'dark-tooltip' : 'light-tooltip'
+          });
+
+          markersLayer.current.addLayer(marker);
         }
       });
     }
-  }, [data, layer]);
+  }, [data, layer, isDark]);
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => {
+      if(activeView === 'map' && mapInstance.current) {
+          setTimeout(() => mapInstance.current.invalidateSize(), 400);
+      }
+  }, [activeView, isSidebarOpen]);
 
   return (
-    <div className={`h-screen w-full flex ${t.bg}`}>
-      {isSidebarOpen && (
-        <aside className={`${t.sidebar} w-64 p-4 border-r flex flex-col`}>
-          <h1 className="text-xl font-bold mb-6">Propolis</h1>
-          {Object.keys(layerInfo).map(key => (
-            <button key={key} onClick={() => setLayer(key)} className="flex items-center gap-3 p-3 hover:bg-slate-700/20 rounded">
-              {layerInfo[key].icon} {layerInfo[key].name}
-            </button>
-          ))}
-          <button onClick={() => setTheme(isDark ? 'light' : 'dark')} className="mt-auto p-3 border rounded">
-            {isDark ? 'โหมดสว่าง' : 'โหมดมืด'}
-          </button>
-        </aside>
-      )}
+    <div className={`h-screen w-full flex overflow-hidden ${t.bg} ${t.text} font-sans transition-colors duration-300`}>
 
-      <main className="flex-1 relative">
-        <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="absolute top-4 left-4 z-[1000] p-2 bg-white rounded shadow">
-          <Menu size={24} />
-        </button>
-        <div ref={mapRef} className="w-full h-full" />
-      </main>
+      {/* 📍 Sidebar */}
+      <div className={`${t.sidebar} flex flex-col z-40 transition-all duration-300 absolute md:relative h-full shadow-2xl md:shadow-none border-r ${isSidebarOpen ? 'w-72 translate-x-0' : 'w-72 -translate-x-full md:w-0 md:border-none'}`}>
+        <div className={`p-6 flex-grow overflow-y-auto ${!isSidebarOpen ? 'md:hidden' : ''}`}>
+
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <div className={`w-10 h-10 rounded-xl shadow-sm p-1 flex items-center justify-center shrink-0 ${isDark ? 'bg-white' : 'bg-slate-50 border border-gray-200'}`}>
+                <img src="/logo.png" alt="Propolis Logo" className="w-full h-full object-contain" />
+              </div>
+              <h1 className="text-2xl font-bold tracking-tight">Propolis</h1>
+            </div>
+            <button onClick={() => setIsSidebarOpen(false)} className="md:hidden p-2 rounded-lg hover:bg-slate-500/20">
+              <X size={20} />
+            </button>
+          </div>
+
+          <div className={`flex p-1 rounded-lg mb-6 border ${t.themeToggleBg} ${isDark ? 'border-slate-800' : 'border-gray-200'}`}>
+            <button onClick={() => setTheme('light')} className={`flex-1 flex items-center justify-center gap-2 py-1.5 rounded-md text-xs font-semibold transition-all ${!isDark ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-300'}`}>
+              <Sun size={14} /> สว่าง
+            </button>
+            <button onClick={() => setTheme('dark')} className={`flex-1 flex items-center justify-center gap-2 py-1.5 rounded-md text-xs font-semibold transition-all ${isDark ? 'bg-slate-700 shadow text-white' : 'text-slate-500 hover:text-slate-700'}`}>
+              <Moon size={14} /> มืด
+            </button>
+          </div>
+
+          <div className="mb-6">
+            <label className={`block text-xs font-bold ${t.textMuted} uppercase tracking-wider mb-3`}>มุมมอง (Views)</label>
+            <div className="space-y-2">
+              <button onClick={() => setActiveView('map')} className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all border ${activeView === 'map' ? t.btnActive : t.btnInactive}`}>
+                <MapIcon className="w-5 h-5 text-emerald-500" />
+                <span className="text-sm font-medium">หน้าหลัก (แผนที่)</span>
+              </button>
+              <button onClick={() => setActiveView('dashboard')} className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all border ${activeView === 'dashboard' ? t.btnActive : t.btnInactive}`}>
+                <LayoutDashboard className="w-5 h-5 text-blue-500" />
+                <span className="text-sm font-medium">แผงควบคุม (ตารางข้อมูล)</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="mb-6">
+            <label className={`block text-xs font-bold ${t.textMuted} uppercase tracking-wider mb-3`}>ชั้นข้อมูล (Layers)</label>
+            <div className="space-y-2">
+              {Object.keys(layerInfo).map(key => (
+                <button key={key} onClick={() => setLayer(key)} className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all border ${layer === key ? t.btnActive : t.btnInactive}`}>
+                  {layerInfo[key].icon}
+                  <span className="text-sm font-medium">{layerInfo[key].name}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className={`p-4 rounded-xl mt-auto border ${systemStatus.success > 0 ? t.statusSuccessBg : t.statusErrorBg}`}>
+            <div className="flex items-center gap-3 mb-2">
+              {systemStatus.success > 0 ? <CheckCircle2 className={`w-5 h-5 ${t.statusSuccessText}`} /> : <AlertTriangle className={`w-5 h-5 ${t.statusErrorText}`} />}
+              <span className={`text-sm font-bold ${systemStatus.success > 0 ? t.statusSuccessText : t.statusErrorText}`}>สถานะเซิร์ฟเวอร์</span>
+            </div>
+            <p className="text-xs opacity-80">อัปเดต: {systemStatus.lastUpdated}</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex-1 flex flex-col relative h-full">
+        <div className="absolute top-4 left-4 right-4 z-30 flex justify-between items-center pointer-events-none">
+          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className={`pointer-events-auto p-3 rounded-xl shadow-lg border transition-all hover:scale-105 ${isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-gray-200 text-slate-800'}`}>
+            <Menu size={20} />
+          </button>
+          <button onClick={fetchData} disabled={loading} className={`pointer-events-auto flex items-center gap-2 px-4 py-2.5 rounded-xl shadow-lg border transition-all text-sm font-semibold hover:scale-105 ${isDark ? 'bg-slate-800 border-slate-700 text-emerald-400' : 'bg-white border-gray-200 text-emerald-600'}`}>
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            {loading ? 'ซิงค์...' : 'รีเฟรช'}
+          </button>
+        </div>
+
+        {/* 🗺️ MAP VIEW */}
+        <div className={`w-full h-full absolute inset-0 transition-opacity duration-500 ${activeView === 'map' ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
+          <div ref={mapRef} className="w-full h-full z-0" style={{ backgroundColor: isDark ? '#0f172a' : '#f8fafc' }}></div>
+          <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
+            <div className={`px-6 py-3 rounded-full shadow-xl border backdrop-blur-md flex items-center gap-3 ${isDark ? 'bg-slate-900/80 border-slate-700 text-white' : 'bg-white/90 border-gray-200 text-slate-800'}`}>
+              {layerInfo[layer].icon}
+              <span className="font-bold">โหมดแสดงผล: {layerInfo[layer].name}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* 📊 DASHBOARD VIEW */}
+        <div className={`w-full h-full overflow-y-auto p-8 pt-24 absolute inset-0 transition-opacity duration-500 ${t.bg} ${activeView === 'dashboard' ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
+          <div className="max-w-7xl mx-auto">
+            <h2 className={`text-2xl font-bold mb-6 ${t.textStrong}`}>แผงควบคุมข้อมูลเชิงลึก (Dashboard)</h2>
+
+            {layer === 'agri_risk' ? (
+               <div className="mb-8">
+                  <div className={`p-6 rounded-2xl border bg-gradient-to-br from-green-500/10 to-emerald-600/10 border-green-500/30 mb-6`}>
+                    <h3 className={`text-xl font-bold mb-2 flex items-center gap-2 ${isDark ? 'text-green-400' : 'text-green-700'}`}>
+                      <Sprout size={24}/> แดชบอร์ดเตือนภัยการเกษตร
+                    </h3>
+                    <p className={`text-sm ${t.textMuted}`}>ระบบวิเคราะห์ข้อมูลจากหลายตัวแปรเพื่อแจ้งเตือนภัยพิบัติและโรคพืชล่วงหน้าให้เกษตรกร</p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {data.map((loc, idx) => {
+                      const risk = calculateAgriRisk(loc);
+                      return (
+                        <div key={idx} className={`p-5 rounded-xl border flex flex-col gap-3 transition-colors ${t.card} ${t.cardHover}`}>
+                          <div className="flex justify-between items-start">
+                             <h4 className={`text-lg font-bold ${t.textStrong}`}>{loc.name}</h4>
+                             <span className="flex h-3 w-3 mt-1 relative">
+                               {risk.level > 0 && <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${risk.level === 2 ? 'bg-red-400' : 'bg-yellow-400'}`}></span>}
+                               <span className={`relative inline-flex rounded-full h-3 w-3 ${risk.level === 2 ? 'bg-red-500' : risk.level === 1 ? 'bg-yellow-500' : 'bg-green-500'}`}></span>
+                             </span>
+                          </div>
+                          <div>
+                            {risk.warnings.map((w, i) => (
+                              <p key={i} className={`text-sm font-semibold mb-1 ${risk.level === 2 ? 'text-red-500' : risk.level === 1 ? 'text-amber-500' : 'text-green-500'}`}>{w}</p>
+                            ))}
+                          </div>
+                          <div className={`mt-auto pt-3 border-t text-xs ${isDark ? 'border-slate-800' : 'border-gray-100'}`}>
+                             <span className={t.textMuted}>คำแนะนำ: </span>
+                             <span className={t.textStrong}>{risk.advice}</span>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+               </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                  <div className={`p-6 rounded-2xl border ${t.card}`}>
+                    <p className={`text-sm font-medium ${t.textMuted} mb-2`}>ค่าเฉลี่ยระดับประเทศ ({layerInfo[layer].name})</p>
+                    <div className="flex items-end gap-3">
+                      <h2 className={`text-4xl font-light ${t.textStrong}`}>{lastMetrics.avg.toFixed(1)}<span className={`text-xl ${t.textMuted} ml-1`}>{layerInfo[layer].unit}</span></h2>
+                    </div>
+                  </div>
+                  <div className={`p-6 rounded-2xl border ${t.card}`}>
+                    <p className={`text-sm font-medium ${t.textMuted} mb-2`}>จุดวิกฤตสูงสุด (จากทุกจุดตรวจวัด)</p>
+                    <div className="flex items-end gap-3">
+                      <h2 className={`text-4xl font-light ${layerInfo[layer].color}`}>{lastMetrics.max.toFixed(1)}<span className={`text-xl ${t.textMuted} ml-1`}>{layerInfo[layer].unit}</span></h2>
+                    </div>
+                    {lastMetrics.maxLocation && (
+                      <p className={`text-xs mt-3 ${t.textMuted} flex items-start gap-1`}>
+                        <MapPin className="w-4 h-4 shrink-0 opacity-70" />
+                        <span className="leading-tight">พบที่: <span className={`font-semibold ${t.textStrong}`}>{lastMetrics.maxLocation}</span></span>
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {data.map((loc, idx) => {
+                    const rainStatus = analyzeRainIntensity(loc[layer] || 0);
+                    return (
+                    <div key={idx} className={`p-5 rounded-xl border flex flex-col justify-between transition-colors ${t.card} ${t.cardHover}`}>
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <h4 className={`font-bold ${t.textStrong}`}>{loc.name}</h4>
+                          <p className={`text-xs mt-1 font-mono ${t.textMuted}`}>
+                            {loc.source?.includes('TMD') && ['tc', 'ws10', 'rh', 'pressure'].includes(layer)
+                              ? '🟢 TMD API'
+                              : '🟡 Open-Meteo Satellite'}
+                          </p>
+                        </div>
+                        <div className={`text-2xl font-semibold text-right ${layerInfo[layer].color}`}>
+                          {(loc[layer] || 0).toFixed(1)}<span className={`text-sm ml-1 ${t.textMuted}`}>{layerInfo[layer].unit}</span>
+                        </div>
+                      </div>
+
+                      {/* 4. แสดงผลป้ายกำกับสถานะ WMO ลงในการ์ดของ Dashboard */}
+                      {layer === 'rain_mm' && (
+                        <div className={`mt-4 px-3 py-1.5 rounded-lg text-xs font-bold text-center ${rainStatus.bg} ${rainStatus.color}`}>
+                          {rainStatus.label}
+                        </div>
+                      )}
+                    </div>
+                  )})}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <style dangerouslySetInnerHTML={{__html: `
+        .dark-tooltip { background-color: #1e293b !important; color: white !important; border-color: #334155 !important; }
+        .light-tooltip { background-color: white !important; color: #1e293b !important; border-color: #e2e8f0 !important; }
+        .leaflet-tooltip::before { border-top-color: inherit !important; }
+      `}} />
     </div>
   );
 }
