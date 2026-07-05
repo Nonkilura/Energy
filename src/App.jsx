@@ -41,7 +41,7 @@ export default function App() {
   const [activeView, setActiveView] = useState('map');
 
   const [systemStatus, setSystemStatus] = useState({ success: 0, total: 9, logs: [], lastUpdated: "" });
-  const [lastMetrics, setLastMetrics] = useState({ avg: 0, max: 0 });
+  const [lastMetrics, setLastMetrics] = useState({ avg: 0, max: 0, maxLocation: "" });
 
   const mapRef = useRef(null);
   const mapInstance = useRef(null);
@@ -124,8 +124,32 @@ export default function App() {
   useEffect(() => {
     if (!loading && data.length > 0) {
       const currentAvg = data.reduce((acc, curr) => acc + (curr[layer] || 0), 0) / data.length;
-      const currentMax = Math.max(...data.map(d => d[layer] || 0));
-      setLastMetrics({ avg: currentAvg, max: currentMax });
+
+      let currentMax = -Infinity;
+      let maxLocName = "";
+
+      data.forEach(d => {
+        const val = d[layer] || 0;
+        if (val > currentMax) {
+          currentMax = val;
+          maxLocName = d.name;
+        } else if (val === currentMax && maxLocName !== d.name) {
+          // หากมีค่าสูงสุดเท่ากันหลายที่ ให้แสดงต่อกัน (ใส่เฉพาะเมื่อค่ายังไม่รวมชื่อนั้น)
+          if(!maxLocName.includes(d.name)) {
+              maxLocName += `, ${d.name}`;
+          }
+        }
+      });
+
+      // จัดการตัดคำกรณีที่ชื่อจังหวัดยาวเกินไปหรือมีหลายที่
+      if (maxLocName.length > 25) {
+        const parts = maxLocName.split(',');
+        if(parts.length > 2) {
+           maxLocName = `${parts[0]}, ${parts[1]} และอีก ${parts.length - 2} แห่ง`;
+        }
+      }
+
+      setLastMetrics({ avg: currentAvg, max: currentMax, maxLocation: maxLocName });
     }
   }, [layer, loading, data]);
 
@@ -352,11 +376,18 @@ export default function App() {
                   <h2 className={`text-4xl font-light ${t.textStrong}`}>{lastMetrics.avg.toFixed(1)}<span className={`text-xl ${t.textMuted} ml-1`}>{layerInfo[layer].unit}</span></h2>
                 </div>
               </div>
+
               <div className={`p-6 rounded-2xl border ${t.card}`}>
-                <p className={`text-sm font-medium ${t.textMuted} mb-2`}>จุดวิกฤตสูงสุด (Max)</p>
+                <p className={`text-sm font-medium ${t.textMuted} mb-2`}>จุดวิกฤตสูงสุด (จากทุกจุดตรวจวัด)</p>
                 <div className="flex items-end gap-3">
                   <h2 className={`text-4xl font-light ${layerInfo[layer].color}`}>{lastMetrics.max.toFixed(1)}<span className={`text-xl ${t.textMuted} ml-1`}>{layerInfo[layer].unit}</span></h2>
                 </div>
+                {lastMetrics.maxLocation && (
+                  <p className={`text-xs mt-3 ${t.textMuted} flex items-start gap-1`}>
+                    <MapPin className="w-4 h-4 shrink-0 opacity-70" />
+                    <span className="leading-tight">พบที่: <span className={`font-semibold ${t.textStrong}`}>{lastMetrics.maxLocation}</span></span>
+                  </p>
+                )}
               </div>
             </div>
 
