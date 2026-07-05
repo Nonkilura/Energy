@@ -378,7 +378,7 @@ export default function App() {
               </div>
 
               <div className={`p-6 rounded-2xl border ${t.card}`}>
-                <p className={`text-sm font-medium ${t.textMuted} mb-2`}>จุดวิกฤตสูงสุด (จากทุกจุดตรวจวัด)</p>
+                <p className={`text-sm font-medium ${t.textMuted} mb-2`}>ค่าสูงสุด (จากทุกจุดตรวจวัด)</p>
                 <div className="flex items-end gap-3">
                   <h2 className={`text-4xl font-light ${layerInfo[layer].color}`}>{lastMetrics.max.toFixed(1)}<span className={`text-xl ${t.textMuted} ml-1`}>{layerInfo[layer].unit}</span></h2>
                 </div>
