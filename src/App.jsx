@@ -68,7 +68,7 @@ export default function App() {
   };
 
   const layerInfo = {
-    'agri_risk': { name: '⚠️ ประเมินวิกฤตการเกษตร', icon: <Sprout className="w-5 h-5 text-green-500" />, unit: '', color: 'text-green-500' },
+    'agri_risk': { name: 'คำแนะนำการเกษตร', icon: <Sprout className="w-5 h-5 text-green-500" />, unit: '', color: 'text-green-500' },
     'tc': { name: 'อุณหภูมิ', icon: <Thermometer className="w-5 h-5 text-orange-500" />, unit: '°C', color: 'text-orange-500' },
     'ws10': { name: 'ความเร็วลม', icon: <Wind className="w-5 h-5 text-teal-500" />, unit: ' km/h', color: 'text-teal-500' },
     'rh': { name: 'ความชื้นสัมพัทธ์', icon: <Droplets className="w-5 h-5 text-blue-500" />, unit: '%', color: 'text-blue-500' },
