@@ -365,7 +365,12 @@ export default function App() {
                 <div key={idx} className={`p-5 rounded-xl border flex justify-between items-center transition-colors ${t.card} ${t.cardHover}`}>
                   <div>
                     <h4 className={`font-bold ${t.textStrong}`}>{loc.name}</h4>
-                    <p className={`text-xs mt-1 font-mono ${t.textMuted}`}>{loc.source.includes('TMD') ? '🟢 Data Fusion' : '🟡 NWP Model'}</p>
+                    <p className={`text-xs mt-1 font-mono ${t.textMuted}`}>
+                      {/* เช็คว่า API รัฐบาลใช้ได้ และ ชั้นข้อมูลปัจจุบันเป็นข้อมูลที่รัฐบาลมีให้ */}
+                      {loc.source?.includes('TMD') && ['tc', 'ws10', 'rh', 'pressure'].includes(layer)
+                        ? '🟢 TMD API'
+                        : '🟡 Open-Meteo Satellite'}
+                    </p>
                   </div>
                   <div className={`text-2xl font-semibold ${layerInfo[layer].color}`}>
                     {(loc[layer] || 0).toFixed(1)}<span className={`text-sm ml-1 ${t.textMuted}`}>{layerInfo[layer].unit}</span>
