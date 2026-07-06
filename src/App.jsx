@@ -172,7 +172,7 @@ export default function App() {
           success: dbData.successCount || 0,
           total: dbData.data.length || 9,
           logs: dbData.logs || [],
-          lastUpdated: dbData.lastUpdated || "ไม่ทราบเวลา"
+          lastUpdated: dbData.updated || "ไม่ทราบเวลา"
         });
       } else {
         setData([]);
