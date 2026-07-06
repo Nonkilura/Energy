@@ -107,7 +107,7 @@ export default function App() {
       advice = "เสริมความแข็งแรงโรงเรือน งดฉีดพ่นสารเคมี";
     } else if (wind > 20) {
       riskLevel = Math.max(riskLevel, 1);
-      warnings.push("💨 ลมกระโชกแรง");
+      warnings.push("💨 ลมกระโชกแรง ");
     }
 
     // 2. ฝนตกหนัก/Rain Bomb
@@ -207,9 +207,9 @@ export default function App() {
         }
       });
 
-      if (maxLocName.length > 25) {
-        const parts = maxLocName.split(',');
-        if(parts.length > 2) maxLocName = `${parts[0]}, ${parts[1]} และอีก ${parts.length - 2} แห่ง`;
+      const parts = maxLocName.split(',');
+      if (parts.length > 2) {
+          maxLocName = `${parts[0].trim()}, ${parts[1].trim()} และอีก ${parts.length - 2} แห่ง`;
       }
       setLastMetrics({ avg: currentAvg, max: currentMax, maxLocation: maxLocName });
     }
@@ -217,11 +217,18 @@ export default function App() {
 
   // สร้างแผนที่ Leaflet
   useEffect(() => {
+    let isMounted = true;
     let L;
+
     loadLeaflet().then((leaflet) => {
+      if (!isMounted) return; // Abort if component unmounted during the fetch
       L = leaflet;
-      if (!mapInstance.current && mapRef.current) {
-        mapInstance.current = L.map(mapRef.current, {
+
+      const mapContainer = mapRef.current;
+
+      // Ensure container exists AND Leaflet hasn't already tagged it
+      if (mapContainer && !mapContainer._leaflet_id && !mapInstance.current) {
+        mapInstance.current = L.map(mapContainer, {
           center: [13.736717, 100.523186],
           zoom: 6,
           zoomControl: false
@@ -239,12 +246,14 @@ export default function App() {
     });
 
     return () => {
+      isMounted = false;
       if (mapInstance.current) {
+        mapInstance.current.off(); // Detach event listeners
         mapInstance.current.remove();
         mapInstance.current = null;
       }
     };
-  }, []);
+  }, []); // isDark is purposefully excluded here to prevent map destruction
 
   // อัปเดตตีมของแผนที่
   useEffect(() => {
