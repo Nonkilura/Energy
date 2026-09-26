@@ -1,0 +1,2 @@
+first select the energy-app in the console : cd energy-app
+then run [git add. ==> git commit -m "" ==> git push origin main]

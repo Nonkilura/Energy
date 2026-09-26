@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Thermometer, Wind, Droplets, AlertTriangle, CheckCircle2, MapPin, RefreshCw, CloudRain, Cloud, Gauge, Sun, Moon, Menu, X, Map as MapIcon, LayoutDashboard, Sprout, Search, Star } from 'lucide-react';
+import { Thermometer, Wind, Droplets, AlertTriangle, CheckCircle2, MapPin, RefreshCw, CloudRain, Cloud, Gauge, Sun, Moon, Menu, X, Map as MapIcon, LayoutDashboard, Search, Star, Activity } from 'lucide-react';
 
 const loadLeaflet = () => {
   return new Promise((resolve) => {
@@ -23,10 +23,9 @@ export default function App() {
   const [layer, setLayer] = useState('tc');
   const [isDark, setIsDark] = useState(false);
   const [activeView, setActiveView] = useState('dashboard');
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [dataSource, setDataSource] = useState('tmd'); // 'tmd' or 'open-meteo'
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Pinning System
   const [favorites, setFavorites] = useState(() => {
     const saved = localStorage.getItem('weatherPins');
     return saved ? JSON.parse(saved) : ["กรุงเทพมหานคร"];
@@ -50,9 +49,10 @@ export default function App() {
   };
 
   const layerInfo = {
-    'tc': { name: 'อุณหภูมิ', icon: <Thermometer className="w-5 h-5 text-orange-500" />, unit: '°C', color: 'text-orange-500' },
-    'rain_prob': { name: 'โอกาสฝนตก (พยากรณ์)', icon: <CloudRain className="w-5 h-5 text-indigo-500" />, unit: '%', color: 'text-indigo-500' },
+    'tc': { name: 'อุณหภูมิปัจจุบัน', icon: <Thermometer className="w-5 h-5 text-orange-500" />, unit: '°C', color: 'text-orange-500' },
+    'forecast_tmax': { name: 'อุณหภูมิสูงสุด (พยากรณ์)', icon: <Sun className="w-5 h-5 text-red-500" />, unit: '°C', color: 'text-red-500' },
     'rain_mm': { name: 'ปริมาณฝนสะสม', icon: <Droplets className="w-5 h-5 text-blue-400" />, unit: ' มม.', color: 'text-blue-400' },
+    'rain_prob': { name: 'โอกาสฝนตก (พยากรณ์)', icon: <CloudRain className="w-5 h-5 text-indigo-500" />, unit: '%', color: 'text-indigo-500' },
     'ws10': { name: 'ความเร็วลม', icon: <Wind className="w-5 h-5 text-teal-500" />, unit: ' km/h', color: 'text-teal-500' },
     'rh': { name: 'ความชื้นสัมพัทธ์', icon: <Cloud className="w-5 h-5 text-blue-500" />, unit: '%', color: 'text-blue-500' }
   };
@@ -90,21 +90,37 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Map Initialization
+  // Map Initialization with OpenStreetMap (Free, No API Key Required)
   useEffect(() => {
     let isMounted = true;
     loadLeaflet().then((L) => {
       if (!isMounted || !mapRef.current) return;
       if (!mapInstance.current) {
         mapInstance.current = L.map(mapRef.current, { center: [13.75, 100.5], zoom: 6, zoomControl: false });
+
+        // Switched from Carto to standard OpenStreetMap tiles
         tileLayer.current = L.tileLayer(
-          isDark ? "https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png" : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+          isDark
+            ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" // Carto Dark usually doesn't block
+            : "https://tile.openstreetmap.org/{z}/{x}/{y}.png", // Reliable standard OSM for light mode
+            { attribution: '&copy; OpenStreetMap contributors' }
         ).addTo(mapInstance.current);
+
         markersLayer.current = L.layerGroup().addTo(mapInstance.current);
       }
     });
     return () => { isMounted = false; };
   }, []);
+
+  // Update Map Theme
+  useEffect(() => {
+    if (tileLayer.current) {
+        const newUrl = isDark
+            ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+            : "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+        tileLayer.current.setUrl(newUrl);
+    }
+  }, [isDark]);
 
   // Update Map Markers
   useEffect(() => {
@@ -114,7 +130,10 @@ export default function App() {
         if (loc.lat && loc.lon) {
           const val = loc[layer] || 0;
           let color = '#3b82f6';
-          if (layer === 'tc') color = val > 35 ? '#ef4444' : val > 30 ? '#f97316' : '#3b82f6';
+
+          if (layer === 'tc' || layer === 'forecast_tmax') color = val > 35 ? '#ef4444' : val > 30 ? '#f97316' : '#3b82f6';
+          if (layer === 'rain_prob') color = val > 70 ? '#4f46e5' : val > 30 ? '#6366f1' : '#9ca3af';
+          if (layer === 'ws10') color = val > 20 ? '#a855f7' : val > 10 ? '#14b8a6' : '#64748b';
 
           const marker = window.L.circleMarker([loc.lat, loc.lon], { radius: 10, color, fillColor: color, fillOpacity: 0.8, weight: 1 });
           marker.bindTooltip(`<b>${loc.name} (${loc.province})</b><br/>${layerInfo[layer].name}: ${val}${layerInfo[layer].unit}`);
@@ -127,7 +146,6 @@ export default function App() {
   const filteredData = data.filter(d =>
     d.name.includes(searchQuery) || d.province.includes(searchQuery)
   );
-
   const pinnedData = data.filter(d => favorites.includes(d.province));
 
   return (
@@ -146,17 +164,17 @@ export default function App() {
             </button>
         </div>
 
-        <div className="mb-6">
-            <label className={`block text-xs font-bold ${t.textMuted} uppercase mb-3`}>ชั้นข้อมูล (แผนที่)</label>
+        <div className="mb-6 overflow-y-auto">
+            <label className={`block text-xs font-bold ${t.textMuted} uppercase mb-3`}>ชั้นข้อมูลหลัก (สำหรับแผนที่/การ์ด)</label>
             {Object.keys(layerInfo).map(key => (
-              <button key={key} onClick={() => setLayer(key)} className={`w-full flex items-center gap-3 p-3 rounded-lg border mb-2 ${layer === key ? 'bg-slate-100 border-slate-300 font-bold' : 'border-transparent'}`}>
+              <button key={key} onClick={() => setLayer(key)} className={`w-full flex items-center gap-3 p-3 rounded-lg border mb-2 ${layer === key ? 'bg-slate-100 border-slate-300 font-bold text-slate-800' : 'border-transparent'}`}>
                 {layerInfo[key].icon} <span className="text-sm">{layerInfo[key].name}</span>
               </button>
             ))}
         </div>
 
         <div className="mt-auto p-4 rounded-xl border bg-emerald-50 border-emerald-100">
-            <p className="text-xs font-bold text-emerald-700">สถานะ: เชื่อมต่อ TMD สำเร็จ</p>
+            <p className="text-xs font-bold text-emerald-700">สถานะ: อัปเดตข้อมูลสำเร็จ</p>
             <p className="text-xs text-emerald-600 mt-1">สถานี: {systemStatus.success} / {systemStatus.total}</p>
         </div>
       </div>
@@ -165,7 +183,7 @@ export default function App() {
       <div className="flex-1 relative h-full flex flex-col">
         {/* Header Actions */}
         <div className="absolute top-4 right-4 z-[2000] flex gap-2">
-            <button onClick={fetchData} className="px-4 py-2 bg-white border rounded-lg shadow-sm flex items-center gap-2 text-sm font-semibold">
+            <button onClick={fetchData} className="px-4 py-2 bg-white border border-gray-200 rounded-lg shadow-sm flex items-center gap-2 text-sm font-semibold text-slate-800 hover:bg-gray-50">
                 <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> อัปเดตข้อมูล
             </button>
         </div>
@@ -178,6 +196,24 @@ export default function App() {
         {/* DASHBOARD VIEW */}
         <div className={`w-full h-full overflow-y-auto p-8 pt-20 absolute inset-0 ${t.bg} ${activeView === 'dashboard' ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
           <div className="max-w-7xl mx-auto">
+
+            {/* Dashboard Source Toggle */}
+            <div className="flex justify-center mb-8">
+              <div className="inline-flex bg-slate-200 rounded-xl p-1 shadow-inner">
+                <button
+                  onClick={() => setDataSource('tmd')}
+                  className={`px-6 py-3 rounded-lg font-bold text-sm transition-all flex items-center gap-2 ${dataSource === 'tmd' ? 'bg-white text-blue-600 shadow' : 'text-slate-500 hover:text-slate-700'}`}
+                >
+                  <Activity className="w-4 h-4" /> ข้อมูลตรวจวัดจริง (TMD)
+                </button>
+                <button
+                  onClick={() => setDataSource('open-meteo')}
+                  className={`px-6 py-3 rounded-lg font-bold text-sm transition-all flex items-center gap-2 ${dataSource === 'open-meteo' ? 'bg-white text-indigo-600 shadow' : 'text-slate-500 hover:text-slate-700'}`}
+                >
+                  <CloudRain className="w-4 h-4" /> พยากรณ์ล่วงหน้า (Open-Meteo)
+                </button>
+              </div>
+            </div>
 
             {/* Search Bar */}
             <div className="relative mb-8">
@@ -200,7 +236,7 @@ export default function App() {
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {pinnedData.map((loc, idx) => (
-                      <StationCard key={idx} loc={loc} t={t} isPinned={true} toggleFav={() => toggleFavorite(loc.province)} />
+                      <StationCard key={`pin-${idx}`} loc={loc} t={t} isPinned={true} toggleFav={() => toggleFavorite(loc.province)} layer={layer} layerInfo={layerInfo} dataSource={dataSource} />
                     ))}
                   </div>
                 )}
@@ -212,7 +248,7 @@ export default function App() {
               <h3 className="text-lg font-bold mb-4">{searchQuery ? 'ผลการค้นหา' : 'สถานีทั้งหมด'}</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {filteredData.map((loc, idx) => (
-                  <StationCard key={idx} loc={loc} t={t} isPinned={favorites.includes(loc.province)} toggleFav={() => toggleFavorite(loc.province)} />
+                  <StationCard key={`all-${idx}`} loc={loc} t={t} isPinned={favorites.includes(loc.province)} toggleFav={() => toggleFavorite(loc.province)} layer={layer} layerInfo={layerInfo} dataSource={dataSource} />
                 ))}
               </div>
             </div>
@@ -224,10 +260,22 @@ export default function App() {
   );
 }
 
-function StationCard({ loc, t, isPinned, toggleFav }) {
+function StationCard({ loc, t, isPinned, toggleFav, layer, layerInfo, dataSource }) {
+  // Dynamically pull the value for the actively selected layer in the sidebar
+  const mainVal = loc[layer] ?? 0;
+  const activeLayerData = layerInfo[layer];
+
+  // Specific data mapping based on which Dashboard is active (TMD vs Open-Meteo)
+  const isTmd = dataSource === 'tmd';
+  const stat1Value = isTmd ? (loc.tc ?? 0) : (loc.forecast_tmax ?? loc.tc ?? 0);
+  const stat2Value = isTmd ? (loc.rain_mm ?? 0) : (loc.rain_prob ?? 0);
+
+  const stat1Label = isTmd ? 'อุณหภูมิปัจจุบัน' : 'คาดการณ์อุณหภูมิสูงสุด';
+  const stat2Label = isTmd ? 'ฝนสะสม (มม.)' : 'โอกาสฝนตก (%)';
+
   return (
-    <div className={`p-5 rounded-xl border flex flex-col gap-4 ${t.card}`}>
-      <div className="flex justify-between items-start">
+    <div className={`p-5 rounded-xl border flex flex-col gap-4 ${t.card} relative overflow-hidden`}>
+      <div className="flex justify-between items-start z-10">
         <div>
           <h4 className="font-bold text-lg">{loc.name}</h4>
           <p className={`text-sm ${t.textMuted}`}>{loc.province}</p>
@@ -237,14 +285,33 @@ function StationCard({ loc, t, isPinned, toggleFav }) {
         </button>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 mt-2">
+      {/* Dynamic Main Metric (Changes based on Sidebar Selection) */}
+      <div className="py-2 border-b border-gray-100 z-10">
+        <p className={`text-xs ${t.textMuted} mb-1 flex items-center gap-1`}>
+          {activeLayerData.icon} {activeLayerData.name}
+        </p>
+        <p className={`font-bold text-3xl ${activeLayerData.color}`}>
+          {mainVal.toFixed(1)}<span className="text-lg ml-1 opacity-70">{activeLayerData.unit}</span>
+        </p>
+      </div>
+
+      {/* Secondary Metrics (Changes based on Dashboard Source Toggle) */}
+      <div className="grid grid-cols-2 gap-4 mt-1 z-10">
         <div>
-          <p className={`text-xs ${t.textMuted} mb-1 flex items-center gap-1`}><Thermometer className="w-3 h-3"/> อุณหภูมิ (TMD)</p>
-          <p className="font-semibold text-xl text-orange-500">{loc.tc.toFixed(1)}°C</p>
+          <p className={`text-xs ${t.textMuted} mb-1 flex items-center gap-1`}>
+             {isTmd ? <Thermometer className="w-3 h-3"/> : <Sun className="w-3 h-3"/>} {stat1Label}
+          </p>
+          <p className={`font-semibold text-lg ${isTmd ? 'text-orange-500' : 'text-red-500'}`}>
+            {stat1Value.toFixed(1)}°C
+          </p>
         </div>
         <div>
-          <p className={`text-xs ${t.textMuted} mb-1 flex items-center gap-1`}><CloudRain className="w-3 h-3"/> โอกาสฝน (พยากรณ์)</p>
-          <p className="font-semibold text-xl text-indigo-500">{loc.rain_prob}%</p>
+          <p className={`text-xs ${t.textMuted} mb-1 flex items-center gap-1`}>
+            {isTmd ? <Droplets className="w-3 h-3"/> : <CloudRain className="w-3 h-3"/>} {stat2Label}
+          </p>
+          <p className={`font-semibold text-lg ${isTmd ? 'text-blue-500' : 'text-indigo-500'}`}>
+            {stat2Value}{isTmd ? ' มม.' : '%'}
+          </p>
         </div>
       </div>
     </div>
